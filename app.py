@@ -9,7 +9,6 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# 移除 Streamlit 外圍空白，並強制 iframe 適配手機與電腦可視高度
 st.markdown("""
 <style>
     .block-container { padding: 0rem !important; max-width: 100% !important; }
@@ -55,8 +54,8 @@ FUJI_SVG = """data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' vi
 DEFAULT_ROOM = {
     "width": 460, "depth": 360, "height": 280,
     "editable": False,
-    "show_walls": True,      # 預設顯示白牆
-    "show_ceiling": False,   # 預設可勾選天花板
+    "show_walls": True,
+    "show_ceiling": False,
     "wall_color": "#F8FAFC",
     "ceiling_color": "#FFFFFF",
     "wall_texture": "",
@@ -65,10 +64,10 @@ DEFAULT_ROOM = {
 
 DEFAULT_HUMAN = {
     "x": 230, "y": 230, "z": 0,
-    "height": 178,           # 預設身高 178cm
+    "height": 178,           # 預設身高 178cm (僅能於左側面板修改，3D畫布鎖定高度防誤觸)
     "rot": 0,                # 水平視角面向角度 (度)
-    "pitch": 0,              # 垂直仰角/俯角 (度，正數為抬頭仰視)
-    "posture": "stand"       # "stand" (站立) | "lie" (仰躺在床/地面)
+    "pitch": 0,              # 垂直仰角/俯角 (度)
+    "posture": "stand"       # "stand" (站立) | "sit" (坐姿) | "lie" (躺姿)
 }
 
 DEFAULT_COMPASS = {
@@ -80,10 +79,11 @@ DEFAULT_VOIDS = [
     {"id": "void_1", "name": "留白處 1", "x": 370, "y": 0, "w": 90, "d": 120}
 ]
 
-DEFAULT_CATEGORIES = ["大型家具", "收納櫃體", "門窗建材", "機電開關"]
+# 「床」獨立為專屬分類項目
+DEFAULT_CATEGORIES = ["床", "大型家具", "收納櫃體", "門窗建材", "機電開關"]
 
 DEFAULT_ITEMS = [
-    {"id": "bed", "name": "床", "category": "大型家具", "item_type": "furniture", "x": 200, "y": 0, "z": 0, "w": 152, "d": 195, "h": 55, "rot": 0, "color": "#FAD785", "texture": "", "scenery": "", "flip_x": False, "flip_y": False},
+    {"id": "bed", "name": "床", "category": "床", "item_type": "furniture", "x": 200, "y": 0, "z": 0, "w": 152, "d": 195, "h": 55, "rot": 0, "color": "#FAD785", "texture": "", "scenery": "", "flip_x": False, "flip_y": False},
     {"id": "stand_l", "name": "床頭櫃(左)", "category": "收納櫃體", "item_type": "furniture", "x": 175, "y": 0, "z": 0, "w": 25, "d": 40, "h": 45, "rot": 0, "color": "#FAD785", "texture": "", "scenery": "", "flip_x": False, "flip_y": False},
     {"id": "stand_r", "name": "床頭櫃(右)", "category": "收納櫃體", "item_type": "furniture", "x": 352, "y": 0, "z": 0, "w": 25, "d": 40, "h": 45, "rot": 0, "color": "#FAD785", "texture": "", "scenery": "", "flip_x": False, "flip_y": False},
     {"id": "wardrobe_new", "name": "新衣櫃", "category": "收納櫃體", "item_type": "furniture", "x": 0, "y": 0, "z": 0, "w": 121, "d": 72, "h": 210, "rot": 0, "color": "#A0CB88", "texture": "", "scenery": "", "flip_x": False, "flip_y": False},
@@ -125,9 +125,9 @@ html_code = f"""
     .app-container {{ display: flex; height: 100dvh; width: 100vw; position: relative; overflow: hidden; }}
     
     /* 左右側邊欄與中間畫布 */
-    .left-panel {{ width: 340px; background: #16191E; border-right: 1px solid #282C34; display: flex; flex-direction: column; height: 100%; z-index: 30; transition: transform 0.25s ease; }}
+    .left-panel {{ width: 345px; background: #16191E; border-right: 1px solid #282C34; display: flex; flex-direction: column; height: 100%; z-index: 30; transition: transform 0.25s ease; }}
     .center-canvas {{ flex: 1; display: flex; flex-direction: column; position: relative; background: #090B0E; height: 100%; overflow: hidden; }}
-    .right-panel {{ width: 310px; background: #16191E; border-left: 1px solid #282C34; padding: 12px; display: flex; flex-direction: column; height: 100%; z-index: 30; transition: transform 0.25s ease; }}
+    .right-panel {{ width: 315px; background: #16191E; border-left: 1px solid #282C34; padding: 12px; display: flex; flex-direction: column; height: 100%; z-index: 30; transition: transform 0.25s ease; }}
 
     /* 左面板標籤頁 */
     .tab-bar {{ display: flex; background: #1F232B; border-bottom: 1px solid #282C34; flex-shrink: 0; }}
@@ -161,14 +161,17 @@ html_code = f"""
     .quick-add-sub {{ display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 5px; }}
     .quick-add-sub button {{ padding: 5px 3px; font-size: 11px; }}
 
-    /* 右側分類與清單卡片 */
-    .item-list {{ display: flex; flex-direction: column; gap: 8px; margin-top: 6px; flex: 1; overflow-y: auto; padding-right: 2px; -webkit-overflow-scrolling: touch; }}
-    .cat-section {{ background: #14171C; border: 1px solid #262B35; border-radius: 6px; overflow: hidden; }}
-    .cat-header {{ background: #1E222B; padding: 6px 10px; font-size: 12px; font-weight: 600; color: #93C5FD; display: flex; justify-content: space-between; align-items: center; cursor: pointer; }}
-    .cat-items {{ padding: 6px; display: flex; flex-direction: column; gap: 5px; }}
-    .item-card {{ background: #1F232B; border: 1px solid #2B303A; border-radius: 6px; padding: 7px 9px; cursor: pointer; transition: all 0.15s; display: flex; flex-direction: column; gap: 3px; }}
+    /* 右側與左側分類拖曳清單 */
+    .item-list {{ display: flex; flex-direction: column; gap: 8px; margin-top: 4px; flex: 1; overflow-y: auto; padding-right: 2px; -webkit-overflow-scrolling: touch; }}
+    .cat-section {{ background: #14171C; border: 1px solid #262B35; border-radius: 6px; overflow: hidden; transition: border-color 0.2s, background 0.2s; }}
+    .cat-section.drag-over {{ border: 2px dashed #3B82F6 !important; background: rgba(37, 99, 235, 0.15) !important; }}
+    .cat-header {{ background: #1E222B; padding: 7px 10px; font-size: 12px; font-weight: 600; color: #93C5FD; display: flex; justify-content: space-between; align-items: center; cursor: pointer; }}
+    .cat-items {{ padding: 6px; display: flex; flex-direction: column; gap: 5px; min-height: 28px; }}
+    .item-card {{ background: #1F232B; border: 1px solid #2B303A; border-radius: 6px; padding: 7px 9px; cursor: grab; transition: all 0.15s; display: flex; flex-direction: column; gap: 3px; position: relative; }}
+    .item-card:active {{ cursor: grabbing; }}
     .item-card:hover {{ border-color: #3B82F6; background: #252A35; }}
     .item-card.selected {{ border-color: #3B82F6; background: #1E293B; box-shadow: 0 0 0 1px #3B82F6; }}
+    .item-card.dragging {{ opacity: 0.45; border: 1px dashed #60A5FA; }}
     .item-card-header {{ display: flex; justify-content: space-between; align-items: center; }}
     .item-card .name {{ font-weight: 600; font-size: 12px; color: #FFF; display: flex; align-items: center; gap: 5px; }}
     .item-card .badge {{ font-size: 10px; padding: 1px 4px; border-radius: 4px; background: #334155; color: #E2E8F0; }}
@@ -180,15 +183,19 @@ html_code = f"""
     .view-controls {{ position: absolute; top: 56px; left: 10px; display: flex; gap: 5px; z-index: 15; background: rgba(22,25,30,0.9); padding: 5px; border-radius: 8px; border: 1px solid #282C34; backdrop-filter: blur(4px); flex-wrap: wrap; max-width: calc(100vw - 20px); }}
     .view-controls button {{ padding: 4px 8px; font-size: 11px; }}
 
-    /* 3D 人類視角與互動浮動控制面板 */
-    .fpv-hud {{ position: absolute; bottom: 65px; left: 50%; transform: translateX(-50%); z-index: 18; background: rgba(15, 23, 42, 0.92); border: 1px solid #3B82F6; border-radius: 12px; padding: 8px 12px; display: none; flex-direction: column; gap: 6px; align-items: center; box-shadow: 0 8px 25px rgba(0,0,0,0.6); min-width: 290px; }}
-    .dpad-grid {{ display: grid; grid-template-columns: repeat(3, 38px); gap: 4px; justify-content: center; }}
-    .dpad-grid button {{ height: 34px; font-size: 13px; padding: 0; }}
+    /* 3D 人類視角與互動浮動控制面板 (HUD) */
+    .fpv-hud {{ position: absolute; bottom: 60px; left: 50%; transform: translateX(-50%); z-index: 18; background: rgba(15, 23, 42, 0.94); border: 1px solid #3B82F6; border-radius: 12px; padding: 8px 12px; display: none; flex-direction: column; gap: 6px; align-items: center; box-shadow: 0 8px 25px rgba(0,0,0,0.7); min-width: 310px; max-width: 95vw; }}
+    .dpad-grid {{ display: grid; grid-template-columns: repeat(3, 40px); gap: 4px; justify-content: center; }}
+    .dpad-grid button {{ height: 36px; font-size: 14px; padding: 0; touch-action: none; }}
 
     /* 拖曳丟棄垃圾桶感應區 */
     .trash-dropzone {{ position: absolute; bottom: 68px; left: 50%; transform: translateX(-50%) scale(0.8); opacity: 0; pointer-events: none; z-index: 40; background: rgba(185, 28, 28, 0.92); border: 2px dashed #FCA5A5; color: #FFF; padding: 12px 24px; border-radius: 40px; font-size: 14px; font-weight: bold; display: flex; align-items: center; gap: 8px; transition: all 0.2s ease; box-shadow: 0 8px 24px rgba(220, 38, 38, 0.6); }}
     .trash-dropzone.show {{ opacity: 1; transform: translateX(-50%) scale(1); pointer-events: auto; }}
     .trash-dropzone.hover {{ background: #EF4444; transform: translateX(-50%) scale(1.12); border-color: #FFF; }}
+
+    /* 碰撞提示吐司 */
+    .toast-msg {{ position: absolute; top: 96px; left: 50%; transform: translateX(-50%); background: rgba(220, 38, 38, 0.9); color: #FFF; padding: 6px 14px; border-radius: 20px; font-size: 12px; font-weight: 600; z-index: 35; opacity: 0; pointer-events: none; transition: opacity 0.2s; }}
+    .toast-msg.show {{ opacity: 1; }}
 
     #canvas-container, #three-container {{ width: 100%; height: calc(100% - 48px); position: absolute; top: 48px; left: 0; touch-action: none; }}
     #three-container {{ display: none; }}
@@ -218,7 +225,7 @@ html_code = f"""
   <div class="left-panel" id="left-panel">
     <div class="mobile-close-bar">
       <span>⚙️ 物件編輯與空間設定</span>
-      <button onclick="toggleMobilePanel('canvas')" class="danger" style="padding:3px 8px;">✕ 關閉返回畫布</button>
+      <button onclick="toggleMobilePanel('canvas')" class="danger" style="padding:3px 8px;">✕ 返回畫布</button>
     </div>
     <div class="tab-bar">
       <div class="tab-btn active" id="tab-btn-item" onclick="switchLeftTab('item')">✏️ 物件與分類</div>
@@ -231,7 +238,7 @@ html_code = f"""
     <div class="tab-content" id="tab-content-item">
       <div class="quick-add-box">
         <div style="display:flex; justify-content:space-between; align-items:center;">
-          <span style="font-size:11px; color:#93C5FD; font-weight:600;">➕ 新增物件時指派分類：</span>
+          <span style="font-size:11px; color:#93C5FD; font-weight:600;">➕ 新增時指派分類：</span>
           <select id="new-obj-category" style="width:135px; padding:3px 6px; font-size:11px;"></select>
         </div>
         <div class="quick-add-row">
@@ -245,8 +252,8 @@ html_code = f"""
         </div>
       </div>
 
-      <div id="no-selection" style="color: #94A3B8; font-size: 12px; margin: 10px 0; text-align: center; line-height: 1.5; background: #1F232B; padding: 12px; border-radius: 8px; border: 1px dashed #334155;">
-        👈 <b>點選 2D / 3D 畫面或右側清單的物件</b><br>可連續輸入多位數尺寸、拖曳滑桿旋轉、改分類或丟入垃圾桶刪除
+      <div id="no-selection" style="color: #94A3B8; font-size: 12px; margin: 6px 0; text-align: center; line-height: 1.5; background: #1F232B; padding: 10px; border-radius: 8px; border: 1px dashed #334155;">
+        👈 <b>點選畫面或列表中的物件進行編輯</b><br>💡 右側與下方列表皆支援「按住物件拖曳至其他分類」自動改分類！
       </div>
 
       <div id="prop-editor" style="display: none;">
@@ -256,7 +263,7 @@ html_code = f"""
         </div>
 
         <div class="field-group">
-          <label>名稱與所屬分類</label>
+          <label>名稱與所屬分類 (選「床」則人物可踏上並疊加高度)</label>
           <div class="field-row">
             <input type="text" id="prop-name" style="flex:1.2;">
             <select id="prop-category" style="flex:1;"></select>
@@ -266,7 +273,7 @@ html_code = f"""
         <div class="field-group">
           <label>物件模型種類</label>
           <select id="prop-type">
-            <option value="furniture">🛋️ 一般家具</option>
+            <option value="furniture">🛋️ 一般家具 / 床</option>
             <option value="door">🚪 房門 (Door)</option>
             <option value="window">🪟 窗戶 (Window)</option>
             <option value="socket">🔌 插座 (Socket)</option>
@@ -292,7 +299,6 @@ html_code = f"""
           </div>
         </div>
 
-        <!-- 物件旋轉：同地面八方坐向，支援滑桿拖曳 + 數字輸入 -->
         <div class="field-group" style="background:#1C2029; padding:7px; border-radius:6px; border:1px solid #2E3440;">
           <label><span>🔄 旋轉角度 (拖曳滑桿或輸入)</span><span id="prop-rot-val" style="color:#60A5FA;font-weight:bold;">0°</span></label>
           <input type="range" id="prop-rot-slider" min="0" max="360" value="0" style="width:100%;">
@@ -301,7 +307,7 @@ html_code = f"""
 
         <!-- 房門專屬：開門方向與軸向翻轉控制 -->
         <div class="field-group" id="door-swing-group" style="display:none; background:#271712; padding:8px; border-radius:6px; border:1px solid #9A3412;">
-          <label style="color:#FDBA74; font-weight:600;">🚪 門扇開啟方向編輯 (亦可在2D反向拉伸翻轉)</label>
+          <label style="color:#FDBA74; font-weight:600;">🚪 門扇開啟方向編輯</label>
           <div class="field-row" style="margin-top:4px;">
             <button id="btn-door-flip-x" style="flex:1; background:#7C2D12;">↔️ 左右換邊開</button>
             <button id="btn-door-flip-y" style="flex:1; background:#7C2D12;">↕️ 內外推拉反轉</button>
@@ -334,7 +340,7 @@ html_code = f"""
       </div>
 
       <!-- 自訂分類增減管理區 -->
-      <div class="panel-title" style="margin-top:10px;">🏷️ 分類項目管理 (可自行增減)</div>
+      <div class="panel-title" style="margin-top:8px;">🏷️ 分類管理 (可增減 / 可拖曳物件改分類)</div>
       <div class="field-row">
         <input type="text" id="new-cat-input" placeholder="輸入新分類名稱..." style="flex:1.5;">
         <button onclick="addCategory()" style="background:#2563EB;border-color:#2563EB;">➕ 新增分類</button>
@@ -349,7 +355,7 @@ html_code = f"""
         <input type="checkbox" id="room-editable-lock" style="width:16px; height:16px; cursor:pointer;">
       </div>
 
-      <div class="panel-title">🏠 房間地面尺寸 (cm, 連續輸入即時連動)</div>
+      <div class="panel-title">🏠 房間地面尺寸 (cm)</div>
       <div class="field-row">
         <div><span style="font-size:10px;color:#64748B;">總寬度 X</span><input type="number" id="room-w" class="live-room-input"></div>
         <div><span style="font-size:10px;color:#64748B;">總深度 Y</span><input type="number" id="room-d" class="live-room-input"></div>
@@ -372,7 +378,7 @@ html_code = f"""
           <div><span style="font-size:10px;color:#94A3B8;">天花板顏色</span><input type="color" id="room-ceil-color" class="live-room-input" value="#FFFFFF"></div>
         </div>
         <div class="field-group" style="margin:0;">
-          <label>🖼️ 上傳牆壁材質貼圖 (壁紙/塗料)</label>
+          <label>🖼️ 上傳牆壁材質貼圖</label>
           <input type="file" id="wall-texture-file" accept="image/*" style="font-size:11px;">
         </div>
         <div class="field-group" style="margin:0;">
@@ -422,24 +428,26 @@ html_code = f"""
     <div class="tab-content" id="tab-content-human" style="display: none;">
       <div class="panel-title" style="color:#C084FC;">🚶 人物身高與自然視角設定</div>
       <div style="font-size:11px; color:#94A3B8; line-height:1.4; background:#1F232B; padding:8px; border-radius:6px;">
-        💡 你可以在 2D 或 3D 鳥瞰畫面中<b>直接拖曳紫色人物圖標</b>到任意地方（如床上），並調整面向角度；點擊下方按鈕即可進入自然人類視野！
+        💡 <b>防誤觸保護</b>：3D 畫面中已鎖定人物高度拖拉，身高僅能在此處修改。<br>
+        💡 <b>點擊地面移動</b>：在 3D 或人類視角中<b>直接點擊地板或床面</b>，人物會自動走過去（遇障礙物會阻擋、踏上床自動疊加床高）！
       </div>
 
       <div class="field-group">
-        <label><span>👤 人物身高 (cm)</span><span id="human-eye-info" style="color:#A855F7;">自然眼高: 165 cm</span></label>
+        <label><span>👤 人物身高 (cm, 僅限此處編輯)</span><span id="human-eye-info" style="color:#A855F7;font-weight:bold;">自然眼高: 165 cm</span></label>
         <input type="number" id="human-height" value="178" min="80" max="230">
       </div>
 
       <div class="field-group">
-        <label>人物目前姿態模式</label>
-        <div class="field-row">
-          <button id="btn-posture-stand" class="active" style="flex:1;" onclick="setHumanPosture('stand')">🧍 站立平視</button>
-          <button id="btn-posture-lie" style="flex:1;" onclick="setHumanPosture('lie')">🛏️ 躺床仰視房間</button>
+        <label>人物姿勢切換 (同步影響 3D 人形與人類視角眼高)</label>
+        <div class="quick-add-sub">
+          <button id="btn-posture-stand" class="active" onclick="setHumanPosture('stand')">🧍 站立</button>
+          <button id="btn-posture-sit" onclick="setHumanPosture('sit')">🪑 坐下</button>
+          <button id="btn-posture-lie" onclick="setHumanPosture('lie')">🛏️ 躺下</button>
         </div>
       </div>
 
       <div class="field-group">
-        <label>人物所在位置 X × Y (cm)</label>
+        <label><span>人物所在位置 X × Y (cm)</span><span id="human-basez-info" style="color:#34D399;">踏面高度 Z: 0 cm</span></label>
         <div class="field-row">
           <div><span style="font-size:10px;color:#64748B;">X 坐標</span><input type="number" id="human-x"></div>
           <div><span style="font-size:10px;color:#64748B;">Y 坐標</span><input type="number" id="human-y"></div>
@@ -458,12 +466,13 @@ html_code = f"""
         <input type="number" id="human-pitch" min="-85" max="85">
       </div>
 
-      <button onclick="enterHumanFPV()" class="purple" style="width:100%; padding:10px; font-size:13px; margin-top:6px;">
-        👁️ 立即進入 3D 人類自然視角
+      <button onclick="enterHumanFPV()" class="purple" style="width:100%; padding:10px; font-size:13px; margin-top:4px;">
+        👁️ 進入 3D 人類自然視角
       </button>
-      <button onclick="placeHumanOnBed()" style="width:100%; padding:8px; margin-top:4px;">
-        🛏️ 一鍵把人物躺到床上看房間
-      </button>
+      <div class="field-row" style="margin-top:4px;">
+        <button onclick="placeHumanOnBed('sit')" style="flex:1; padding:7px;">🪑 坐到床沿看房間</button>
+        <button onclick="placeHumanOnBed('lie')" style="flex:1; padding:7px;">🛏️ 躺到床上仰視房間</button>
+      </div>
     </div>
 
     <!-- 標籤 4：專案存檔 -->
@@ -490,21 +499,23 @@ html_code = f"""
   <div class="center-canvas">
     <div class="toolbar">
       <div class="btn-group">
-        <!-- 手機版頂部快速呼叫左右面板按鈕 -->
         <div class="mobile-top-toggles">
           <button onclick="toggleMobilePanel('left')" style="background:#1E293B;border-color:#3B82F6;">⚙️ 編輯</button>
-          <button onclick="toggleMobilePanel('right')" style="background:#1E293B;border-color:#3B82F6;">📋 列表</button>
+          <button onclick="toggleMobilePanel('right')" style="background:#1E293B;border-color:#3B82F6;">📋 分類列表</button>
         </div>
         <button id="btn-mode-2d" class="active">📐 2D 平面</button>
         <button id="btn-mode-3d">🧊 3D 鳥瞰互動</button>
         <button id="btn-mode-fpv" class="purple">👁️ 3D 人類視角</button>
       </div>
       <div class="hint-text" style="font-size: 11px; color: #94A3B8;">
-        💡 2D/3D 皆可點選拖曳物件 | 按 <b>Delete</b> 鍵或拉入下方垃圾桶刪除
+        💡 3D與人類視角皆支援「<b>點擊地板或床面直接走過去</b>」 | 不可穿模，踏上床自動疊加高度
       </div>
     </div>
 
-    <!-- 2D 與 3D 浮動控制列 -->
+    <!-- 碰撞提示訊息 -->
+    <div class="toast-msg" id="toast-msg">⚠️ 前方有家具或牆壁阻擋，無法穿越！</div>
+
+    <!-- 2D 浮動控制列 -->
     <div class="view-controls" id="view-controls-2d">
       <button id="btn-zoom-in">➕ 放大</button>
       <button id="btn-zoom-out">➖ 縮小</button>
@@ -515,35 +526,43 @@ html_code = f"""
 
     <!-- 3D 互動控制器切換列 -->
     <div class="view-controls" id="view-controls-3d" style="display:none;">
-      <span style="font-size:11px;color:#93C5FD;padding:3px 4px;">3D點選物件操作：</span>
+      <span style="font-size:11px;color:#93C5FD;padding:3px 4px;">💡 點擊地面可讓人物走過去 | 點選物件：</span>
       <button id="btn-3d-translate" class="active" onclick="set3DGizmoMode('translate')">✥ 移動</button>
       <button id="btn-3d-rotate" onclick="set3DGizmoMode('rotate')">🔄 旋轉</button>
-      <button id="btn-3d-scale" onclick="set3DGizmoMode('scale')">↔️ 縮放拉伸</button>
-      <button onclick="deleteSelectedActive()" class="danger">🗑️ 刪除選取</button>
+      <button id="btn-3d-scale" onclick="set3DGizmoMode('scale')">↔️ 縮放家具</button>
+      <button onclick="deleteSelectedActive()" class="danger">🗑️ 刪除</button>
     </div>
 
     <!-- 3D 人類第一人稱視角 (FPV) 專屬操控 HUD -->
     <div class="fpv-hud" id="fpv-hud">
-      <div style="display:flex; justify-content:space-between; width:100%; align-items:center; gap:8px;">
-        <span id="fpv-status-text" style="font-size:12px; font-weight:bold; color:#DDD6FE;">👁️ 人類視角 (拖曳畫面轉頭 / 搖桿移動)</span>
-        <button onclick="exitHumanFPV()" class="danger" style="padding:3px 8px; font-size:11px;">退出人類視角</button>
+      <div style="display:flex; justify-content:space-between; width:100%; align-items:center; gap:6px;">
+        <span id="fpv-status-text" style="font-size:11px; font-weight:bold; color:#DDD6FE;">👆 點擊地面走過去 | 拖曳畫面轉頭 | 按方向鍵移動</span>
+        <button onclick="exitHumanFPV()" class="danger" style="padding:3px 8px; font-size:11px;">退出視角</button>
       </div>
-      <div style="display:flex; gap:12px; align-items:center;">
+      <!-- 姿勢同步切換列 (站 / 坐 / 躺) -->
+      <div style="display:flex; gap:5px; width:100%;">
+        <button id="hud-btn-stand" style="flex:1;" onclick="setHumanPosture('stand')">🧍 站立</button>
+        <button id="hud-btn-sit" style="flex:1;" onclick="setHumanPosture('sit')">🪑 坐姿</button>
+        <button id="hud-btn-lie" style="flex:1;" onclick="setHumanPosture('lie')">🛏️ 躺姿仰視</button>
+      </div>
+      <div style="display:flex; gap:12px; align-items:center; width:100%; justify-content:center;">
         <div class="dpad-grid">
           <div></div>
-          <button onmousedown="startMoveFPV(0,1)" onmouseup="stopMoveFPV()" ontouchstart="startMoveFPV(0,1)" ontouchend="stopMoveFPV()">▲</button>
+          <button id="dpad-up">▲</button>
           <div></div>
-          <button onmousedown="startMoveFPV(-1,0)" onmouseup="stopMoveFPV()" ontouchstart="startMoveFPV(-1,0)" ontouchend="stopMoveFPV()">◀</button>
-          <button onclick="toggleLieOnBedFPV()" id="btn-fpv-lie" style="font-size:11px;background:#7C3AED;">🛏️躺</button>
-          <button onmousedown="startMoveFPV(1,0)" onmouseup="stopMoveFPV()" ontouchstart="startMoveFPV(1,0)" ontouchend="stopMoveFPV()">▶</button>
+          <button id="dpad-left">◀</button>
+          <button onclick="placeHumanOnBed('sit')" title="移至床上" style="font-size:12px;background:#7C3AED;">🛏️</button>
+          <button id="dpad-right">▶</button>
           <div></div>
-          <button onmousedown="startMoveFPV(0,-1)" onmouseup="stopMoveFPV()" ontouchstart="startMoveFPV(0,-1)" ontouchend="stopMoveFPV()">▼</button>
+          <button id="dpad-down">▼</button>
           <div></div>
         </div>
-        <div style="display:flex; flex-direction:column; gap:4px; min-width:130px;">
-          <label style="font-size:10px; color:#CBD5E1;">抬頭/低頭仰角 (<span id="hud-pitch-lbl">0°</span>)</label>
-          <input type="range" id="hud-pitch-slider" min="-85" max="85" value="0">
-          <button onclick="placeHumanOnBed()" style="font-size:11px; padding:4px;">🛏️ 躺到床上仰視房間</button>
+        <div style="display:flex; flex-direction:column; gap:4px; flex:1; max-width:155px;">
+          <label style="font-size:10px; color:#CBD5E1; display:flex; justify-content:space-between;">
+            <span>視角仰角</span><span id="hud-pitch-lbl" style="color:#38BDF8;font-weight:bold;">0°</span>
+          </label>
+          <input type="range" id="hud-pitch-slider" min="-85" max="85" value="0" style="width:100%;">
+          <div id="hud-eye-height-lbl" style="font-size:10px; color:#34D399; text-align:center;">目前眼高: 165 cm</div>
         </div>
       </div>
     </div>
@@ -559,15 +578,15 @@ html_code = f"""
     <div id="three-container"></div>
   </div>
 
-  <!-- 右側分類物件清單 -->
+  <!-- 右側分類物件清單 (支援拖曳物件改分類) -->
   <div class="right-panel" id="right-panel">
     <div class="mobile-close-bar">
       <span>📋 空間分類物件列表</span>
-      <button onclick="toggleMobilePanel('canvas')" class="danger" style="padding:3px 8px;">✕ 關閉返回畫布</button>
+      <button onclick="toggleMobilePanel('canvas')" class="danger" style="padding:3px 8px;">✕ 返回畫布</button>
     </div>
     <div class="panel-title">
-      <span>📋 依分類檢視物件</span>
-      <span id="obj-count" style="font-size: 12px; color: #94A3B8;">0</span>
+      <span>📋 分類列表 (按住物件可拖曳改分類)</span>
+      <span id="obj-count" style="font-size: 11px; color: #94A3B8;">0</span>
     </div>
     <div class="quick-add-sub" style="margin-bottom:4px;">
       <button onclick="addNewObject('furniture')" style="background:#2563EB;border-color:#2563EB;">+ 家具</button>
@@ -587,20 +606,26 @@ html_code = f"""
 
 <script>
   let appState = {initial_data_json};
-  // 確保舊存檔相容新欄位
   if (!appState.voids && appState.void) {{
     appState.voids = [{{ id: "void_1", name: "留白處 1", x: appState.void.x, y: appState.void.y, w: appState.void.w, d: appState.void.d }}];
   }}
-  if (!appState.categories) appState.categories = ["大型家具", "收納櫃體", "門窗建材", "機電開關"];
+  if (!appState.categories) appState.categories = ["床", "大型家具", "收納櫃體", "門窗建材", "機電開關"];
+  if (!appState.categories.includes("床")) appState.categories.unshift("床");
+  // 將名稱為床的物件預設歸入「床」分類
+  appState.items.forEach(it => {{ if (it.id === "bed" || it.name === "床") it.category = "床"; }});
+
   if (!appState.human) appState.human = {{ x: 230, y: 230, z: 0, height: 178, rot: 0, pitch: 0, posture: "stand" }};
   if (appState.room.show_walls === undefined) appState.room.show_walls = true;
   if (appState.room.show_ceiling === undefined) appState.room.show_ceiling = false;
 
-  let activeId = null; // 選中的家具或 'HUMAN'
+  let activeId = null;
   let canvas, scene, camera, renderer, controls, transformControl;
-  let currentMode = "2D"; // "2D" | "3D" | "FPV"
+  let currentMode = "2D";
   let gizmoMode = "translate";
   let selectable3DMeshes = [];
+  let walkable3DMeshes = []; // 地板與床面，供點擊走過去使用
+  let human3DGroup = null;
+  let targetRingMesh = null;
   
   let isDraggingCanvas = false;
   let forcePanMode = false;
@@ -608,10 +633,122 @@ html_code = f"""
   let touchStartDist = 0, touchStartZoom = 1;
   let isOverTrash = false;
 
-  // FPV 第一人稱視角移動與轉頭狀態
+  // FPV 與 3D 點擊走動及碰撞狀態
   let fpvMoveDir = {{ forward: 0, right: 0 }};
+  let walkTarget = null; // {{ x, y }} 點擊地面目標點
   let isLookingFPV = false;
   let fpvLastX = 0, fpvLastY = 0;
+  let toastTimeout = null;
+
+  // 清單拖曳改分類狀態
+  let draggedItemId = null;
+
+  function showToast(msg) {{
+    const el = document.getElementById("toast-msg");
+    if (!el) return;
+    el.innerText = msg;
+    el.classList.add("show");
+    if (toastTimeout) clearTimeout(toastTimeout);
+    toastTimeout = setTimeout(() => el.classList.remove("show"), 1800);
+  }}
+
+  // --- 物理碰撞偵測與踏上床面高度計算 ---
+  function isBedItem(it) {{
+    return it.category === "床" || it.id === "bed" || (it.name && it.name.includes("床") && !it.name.includes("櫃"));
+  }}
+
+  // 檢查 (nx, ny) 座標是否可通行（不可穿越非床類家具與四周牆壁；床可踏上去並疊加高度）
+  function checkHumanWalkable(nx, ny) {{
+    const radius = 14; // 人體碰撞半徑 cm
+    const rw = appState.room.width, rd = appState.room.depth;
+
+    // 若開啟實體牆壁，限制在房間牆內
+    if (appState.room.show_walls) {{
+      if (nx < radius || nx > rw - radius || ny < radius || ny > rd - radius) {{
+        return {{ allowed: false, baseZ: appState.human.z || 0 }};
+      }}
+    }}
+
+    let supportZ = 0;
+    for (let i = 0; i < appState.items.length; i++) {{
+      const it = appState.items[i];
+      // 忽略高處窗戶、牆上高處開關插座
+      if (it.item_type === "window" || it.item_type === "socket" || it.item_type === "switch") continue;
+      if ((it.z || 0) > 120) continue;
+
+      const rad = -(it.rot || 0) * Math.PI / 180;
+      const cx = it.x + it.w / 2;
+      const cy = it.y + it.d / 2;
+      const dx = nx - cx;
+      const dy = ny - cy;
+      // 轉換至物件局部座標系檢查碰撞
+      const lx = dx * Math.cos(rad) - dy * Math.sin(rad);
+      const ly = dx * Math.sin(rad) + dy * Math.cos(rad);
+
+      const halfW = it.w / 2;
+      const halfD = it.d / 2;
+
+      if (isBedItem(it)) {{
+        // 床：允許踏上去！若中心點在床範圍內，疊加床的高度
+        if (Math.abs(lx) <= halfW && Math.abs(ly) <= halfD) {{
+          supportZ = Math.max(supportZ, (it.z || 0) + (it.h || 55));
+        }}
+      }} else if (it.item_type === "furniture") {{
+        // 其他家具（衣櫃、書桌、床頭櫃、防潮箱）：阻擋不可穿越！
+        if (Math.abs(lx) < halfW + radius && Math.abs(ly) < halfD + radius) {{
+          return {{ allowed: false, baseZ: appState.human.z || 0 }};
+        }}
+      }}
+    }}
+    return {{ allowed: true, baseZ: supportZ }};
+  }}
+
+  // 嘗試移動人物至 (nx, ny)，支援沿牆滑動與床面高度疊加
+  function tryMoveHumanTo(nx, ny, showBlockMsg = false) {{
+    const res = checkHumanWalkable(nx, ny);
+    if (res.allowed) {{
+      appState.human.x = nx;
+      appState.human.y = ny;
+      appState.human.z = res.baseZ;
+      return true;
+    }}
+    // 嘗試單軸滑動 (X 或 Y 分別移動)
+    const resX = checkHumanWalkable(nx, appState.human.y);
+    if (resX.allowed) {{
+      appState.human.x = nx;
+      appState.human.z = resX.baseZ;
+      return true;
+    }}
+    const resY = checkHumanWalkable(appState.human.x, ny);
+    if (resY.allowed) {{
+      appState.human.y = ny;
+      appState.human.z = resY.baseZ;
+      return true;
+    }}
+    if (showBlockMsg) showToast("⚠️ 前方有家具阻擋，人物無法穿越！");
+    return false;
+  }}
+
+  // 計算真實人類視角眼高 (站立 / 坐下 / 躺下 + 疊加床高)
+  function getHumanEyeHeight() {{
+    const h = appState.human;
+    const stature = h.height || 178;
+    const baseZ = h.z || 0; // 地面為 0，踏上床則為床高 (55cm)
+
+    if (h.posture === "lie") {{
+      // 躺姿：踏面高度 + 頭部枕高約 22cm
+      return Math.round(baseZ + 22);
+    }} else if (h.posture === "sit") {{
+      // 坐姿：若在床上，座面即為床高 baseZ，加上人體坐姿眼高(約身高的 0.44 倍)；若在地面，模擬坐於標準 43cm 椅高或席地坐高(約身高的 0.68 倍)
+      if (baseZ > 0) {{
+        return Math.round(baseZ + stature * 0.44);
+      }} else {{
+        return Math.round(43 + stature * 0.44);
+      }}
+    }}
+    // 站立平視：踏面高度 + 身高 * 0.93
+    return Math.round(baseZ + stature * 0.93);
+  }}
 
   // 九宮飛星資料庫
   const FEIXING_META = {{
@@ -661,7 +798,7 @@ html_code = f"""
     document.getElementById("tab-content-" + tab).style.display = "flex";
   }}
 
-  // --- 分類系統增刪與選單渲染 ---
+  // --- 分類系統增刪與拖曳放置目標區 ---
   function renderCategoryUI() {{
     const newCatSel = document.getElementById("new-obj-category");
     const propCatSel = document.getElementById("prop-category");
@@ -679,13 +816,38 @@ html_code = f"""
       propCatSel.add(new Option(cat, cat));
 
       const tag = document.createElement("div");
-      tag.style.cssText = "background:#1F232B; border:1px solid #3B82F6; border-radius:14px; padding:3px 8px; font-size:11px; display:flex; align-items:center; gap:5px;";
-      tag.innerHTML = `<span>${{cat}}</span><span style="cursor:pointer;color:#F87171;font-weight:bold;" onclick="deleteCategory(${{idx}})">✕</span>`;
+      tag.style.cssText = "background:#1F232B; border:1px solid #3B82F6; border-radius:14px; padding:4px 9px; font-size:11px; display:flex; align-items:center; gap:5px; transition:all 0.15s;";
+      tag.setAttribute("data-cat", cat);
+      tag.innerHTML = `<span>🏷️ ${{cat}}</span><span style="cursor:pointer;color:#F87171;font-weight:bold;" onclick="deleteCategory(${{idx}})">✕</span>`;
+
+      // 支援把物件直接拖曳到左側分類標籤上改分類
+      tag.addEventListener("dragover", e => {{ e.preventDefault(); tag.style.background = "#2563EB"; }});
+      tag.addEventListener("dragleave", () => {{ tag.style.background = "#1F232B"; }});
+      tag.addEventListener("drop", e => {{
+        e.preventDefault();
+        tag.style.background = "#1F232B";
+        if (draggedItemId) moveItemToCategory(draggedItemId, cat);
+      }});
+
       tagsBox.appendChild(tag);
     }});
 
     if (appState.categories.includes(curNewVal)) newCatSel.value = curNewVal;
     if (appState.categories.includes(curPropVal)) propCatSel.value = curPropVal;
+  }}
+
+  function moveItemToCategory(itemId, targetCat) {{
+    const item = appState.items.find(i => i.id === itemId);
+    if (!item) return;
+    item.category = targetCat;
+    draggedItemId = null;
+    updateLeftItemPanel();
+    renderRightPanel();
+    // 重新計算人物是否踏在床分類上
+    const check = checkHumanWalkable(appState.human.x, appState.human.y);
+    appState.human.z = check.baseZ;
+    initHumanFormValues();
+    if (renderer) updateThreeScene();
   }}
 
   window.addCategory = function() {{
@@ -712,7 +874,7 @@ html_code = f"""
     renderRightPanel();
   }};
 
-  // --- 鍵盤 Delete 刪除快捷鍵支援 (當焦點不在輸入框時生效) ---
+  // --- 鍵盤與觸控 D-Pad 移動控制 ---
   window.addEventListener("keydown", function(e) {{
     const tag = document.activeElement ? document.activeElement.tagName.toLowerCase() : "";
     if (tag === "input" || tag === "textarea" || tag === "select") return;
@@ -723,21 +885,30 @@ html_code = f"""
         deleteItemById(activeId);
       }}
     }}
-    // FPV 鍵盤 WASD 移動
-    if (currentMode === "FPV") {{
-      if (e.key === "w" || e.key === "W" || e.key === "ArrowUp") fpvMoveDir.forward = 1;
-      if (e.key === "s" || e.key === "S" || e.key === "ArrowDown") fpvMoveDir.forward = -1;
-      if (e.key === "a" || e.key === "A" || e.key === "ArrowLeft") fpvMoveDir.right = -1;
-      if (e.key === "d" || e.key === "D" || e.key === "ArrowRight") fpvMoveDir.right = 1;
+    if (currentMode === "FPV" || currentMode === "3D") {{
+      if (e.key === "w" || e.key === "W" || e.key === "ArrowUp") {{ fpvMoveDir.forward = 1; walkTarget = null; }}
+      if (e.key === "s" || e.key === "S" || e.key === "ArrowDown") {{ fpvMoveDir.forward = -1; walkTarget = null; }}
+      if (e.key === "a" || e.key === "A" || e.key === "ArrowLeft") {{ fpvMoveDir.right = -1; walkTarget = null; }}
+      if (e.key === "d" || e.key === "D" || e.key === "ArrowRight") {{ fpvMoveDir.right = 1; walkTarget = null; }}
     }}
   }});
 
   window.addEventListener("keyup", function(e) {{
-    if (currentMode === "FPV") {{
-      if (["w","W","s","S","ArrowUp","ArrowDown"].includes(e.key)) fpvMoveDir.forward = 0;
-      if (["a","A","d","D","ArrowLeft","ArrowRight"].includes(e.key)) fpvMoveDir.right = 0;
-    }}
+    if (["w","W","s","S","ArrowUp","ArrowDown"].includes(e.key)) fpvMoveDir.forward = 0;
+    if (["a","A","d","D","ArrowLeft","ArrowRight"].includes(e.key)) fpvMoveDir.right = 0;
   }});
+
+  // 綁定手機與電腦通用的 D-Pad pointer 事件
+  function bindDpadBtn(btnId, rightVal, forwardVal) {{
+    const btn = document.getElementById(btnId);
+    if (!btn) return;
+    const start = (e) => {{ e.preventDefault(); e.stopPropagation(); walkTarget = null; fpvMoveDir.right = rightVal; fpvMoveDir.forward = forwardVal; }};
+    const end = (e) => {{ e.preventDefault(); e.stopPropagation(); fpvMoveDir.right = 0; fpvMoveDir.forward = 0; }};
+    btn.addEventListener("pointerdown", start);
+    btn.addEventListener("pointerup", end);
+    btn.addEventListener("pointerleave", end);
+    btn.addEventListener("pointercancel", end);
+  }}
 
   // --- 初始化 Fabric 2D 互動畫布 ---
   function initFabric() {{
@@ -749,6 +920,11 @@ html_code = f"""
       selection: false,
       preserveObjectStacking: true
     }});
+
+    bindDpadBtn("dpad-up", 0, 1);
+    bindDpadBtn("dpad-down", 0, -1);
+    bindDpadBtn("dpad-left", -1, 0);
+    bindDpadBtn("dpad-right", 1, 0);
 
     canvas.on('mouse:wheel', function(opt) {{
       const delta = opt.e.deltaY;
@@ -787,7 +963,6 @@ html_code = f"""
 
     canvas.on('mouse:up', function() {{
       isDraggingCanvas = false;
-      // 檢查是否拖曳丟入垃圾桶
       const trashEl = document.getElementById("trash-dropzone");
       if (trashEl.classList.contains("show")) {{
         if (isOverTrash && activeId && activeId !== "HUMAN") {{
@@ -798,7 +973,6 @@ html_code = f"""
       }}
     }});
 
-    // 手機雙指縮放支援
     const upperCanvas = canvas.upperCanvasEl;
     upperCanvas.addEventListener('touchstart', function(e) {{
       if (e.touches.length === 2) {{
@@ -827,6 +1001,10 @@ html_code = f"""
     canvas.on('object:rotating', onObjectLiveMoving);
     canvas.on('object:modified', onObjectModifiedComplete);
 
+    // 初始計算人物腳下高度
+    const initWalk = checkHumanWalkable(appState.human.x, appState.human.y);
+    appState.human.z = initWalk.baseZ;
+
     renderCategoryUI();
     initRoomFormValues();
     initHumanFormValues();
@@ -841,10 +1019,8 @@ html_code = f"""
     canvas.clear();
     canvas.backgroundColor = '#0A0C10';
 
-    const rw = appState.room.width;
-    const rd = appState.room.depth;
+    const rw = appState.room.width, rd = appState.room.depth;
 
-    // 1. 房間地面藍色底盤
     canvas.add(new fabric.Rect({{
       left: 0, top: 0, width: rw, height: rd,
       fill: '#5089C6', stroke: '#38BDF8', strokeWidth: 2,
@@ -858,7 +1034,6 @@ html_code = f"""
       left: -20, top: rd / 2, fontSize: 13, fill: '#94A3B8', originX: 'center', angle: -90, selectable: false, evented: false
     }}));
 
-    // 2. 繪製留白處
     const canEditGround = !!appState.room.editable && !forcePanMode;
     appState.voids.forEach(v => {{
       const vRect = new fabric.Rect({{
@@ -880,17 +1055,13 @@ html_code = f"""
       canvas.add(vGroup);
     }});
 
-    // 3. 繪製所有家具、門、窗戶、插座與開關
     appState.items.forEach(item => createFabricItem(item));
 
-    // 4. 繪製九宮飛星與羅盤
     if (appState.compass.show_feixing) renderNinePalaceFeixing();
     if (appState.compass.show) renderExpertCompass();
 
-    // 5. 繪製可拖曳與旋轉的「🚶 人物與視角錐」圖標
     createFabricHuman();
 
-    // 恢復選中狀態
     if (activeId === "HUMAN") {{
       const hg = canvas.getObjects().find(o => o.isHuman);
       if (hg && !forcePanMode) canvas.setActiveObject(hg);
@@ -904,54 +1075,43 @@ html_code = f"""
     if ((currentMode === "3D" || currentMode === "FPV") && renderer) updateThreeScene();
   }}
 
-  // 建立 2D 人物與視角扇形錐 (可直接拖曳移動與旋轉面向)
   function createFabricHuman() {{
     const h = appState.human;
-    // 視角扇形錐 (預設 0 度朝向畫面北方/上方 -Y)
     const fovCone = new fabric.Polygon([
-      {{ x: 0, y: 0 }},
-      {{ x: -32, y: -65 }},
-      {{ x: 32, y: -65 }}
+      {{ x: 0, y: 0 }}, {{ x: -32, y: -65 }}, {{ x: 32, y: -65 }}
     ], {{
-      fill: 'rgba(168, 85, 247, 0.32)',
-      stroke: '#C084FC',
-      strokeWidth: 1.5,
-      originX: 'center', originY: 'bottom',
-      top: 0
+      fill: 'rgba(168, 85, 247, 0.32)', stroke: '#C084FC', strokeWidth: 1.5,
+      originX: 'center', originY: 'bottom', top: 0
     }});
 
+    const postureColor = h.posture === 'lie' ? '#EC4899' : (h.posture === 'sit' ? '#0EA5E9' : '#9333EA');
+    const postureIcon = h.posture === 'lie' ? "🛏️" : (h.posture === 'sit' ? "🪑" : "🧍");
+
     const bodyCircle = new fabric.Circle({{
-      radius: 14,
-      fill: h.posture === 'lie' ? '#EC4899' : '#9333EA',
-      stroke: '#FFFFFF',
-      strokeWidth: 2.5,
+      radius: 14, fill: postureColor, stroke: '#FFFFFF', strokeWidth: 2.5,
       originX: 'center', originY: 'center'
     }});
 
-    const iconTxt = new fabric.Text(h.posture === 'lie' ? "🛏️" : "🚶", {{
+    const iconTxt = new fabric.Text(postureIcon, {{
       fontSize: 14, originX: 'center', originY: 'center'
     }});
 
     const humanGroup = new fabric.Group([fovCone, bodyCircle, iconTxt], {{
-      left: h.x,
-      top: h.y,
-      angle: h.rot || 0,
+      left: h.x, top: h.y, angle: h.rot || 0,
       originX: 'center', originY: 'center',
-      selectable: !forcePanMode,
-      evented: !forcePanMode,
+      selectable: !forcePanMode, evented: !forcePanMode,
       isHuman: true
     }});
 
     humanGroup.setControlsVisibility({{
       mt: false, mb: false, ml: false, mr: false,
       tl: false, tr: false, bl: false, br: false,
-      mtr: true // 允許旋轉視角方向
+      mtr: true
     }});
 
     canvas.add(humanGroup);
   }}
 
-  // 建立 2D 家具與支援正反開向的房門
   function createFabricItem(item) {{
     const subElements = [];
     const rect = new fabric.Rect({{
@@ -961,7 +1121,6 @@ html_code = f"""
     }});
     subElements.push(rect);
 
-    // 房門 (Door)：支援 flip_x (左右換邊開) 與 flip_y (內外反轉開)
     if (item.item_type === "door") {{
       const fx = item.flip_x ? -1 : 1;
       const fy = item.flip_y ? -1 : 1;
@@ -974,15 +1133,11 @@ html_code = f"""
       const sweep = (fx * fy > 0) ? 0 : 1;
 
       const arcPath = new fabric.Path(`M ${{hx}} ${{hy}} L ${{openX}} ${{openY}} A ${{item.w}} ${{item.w}} 0 0 ${{sweep}} ${{closedX}} ${{closedY}}`, {{
-        fill: 'rgba(251, 146, 60, 0.18)',
-        stroke: '#FDBA74',
-        strokeWidth: 1.5,
-        strokeDashArray: [4, 3]
+        fill: 'rgba(251, 146, 60, 0.18)', stroke: '#FDBA74', strokeWidth: 1.5, strokeDashArray: [4, 3]
       }});
       subElements.push(arcPath);
     }}
 
-    // 2D 標籤置中顯示
     const labelStr = `${{item.name}}\n${{Math.round(item.w)}}×${{Math.round(item.d)}}`;
     const fontSize = Math.max(9, Math.min(12, Math.min(item.w, item.d) * 0.45));
     const text = new fabric.Text(labelStr, {{
@@ -992,19 +1147,14 @@ html_code = f"""
     subElements.push(text);
 
     const group = new fabric.Group(subElements, {{
-      left: item.x + item.w / 2,
-      top: item.y + item.d / 2,
-      angle: item.rot || 0,
-      originX: 'center', originY: 'center',
-      selectable: !forcePanMode,
-      evented: !forcePanMode,
-      itemId: item.id
+      left: item.x + item.w / 2, top: item.y + item.d / 2,
+      angle: item.rot || 0, originX: 'center', originY: 'center',
+      selectable: !forcePanMode, evented: !forcePanMode, itemId: item.id
     }});
 
     group.setControlsVisibility({{
       mt: true, mb: true, ml: true, mr: true,
-      tl: true, tr: true, bl: true, br: true,
-      mtr: true
+      tl: true, tr: true, bl: true, br: true, mtr: true
     }});
 
     if (item.texture && item.item_type !== "window") {{
@@ -1019,7 +1169,6 @@ html_code = f"""
     canvas.add(group);
   }}
 
-  // --- 九宮飛星與八方羅盤渲染 ---
   function renderNinePalaceFeixing() {{
     const rw = appState.room.width, rd = appState.room.depth;
     const cw = rw / 3, cd = rd / 3;
@@ -1107,7 +1256,7 @@ html_code = f"""
     }});
   }}
 
-  // --- 2D 選取、拖曳與垃圾桶感應 ---
+  // --- 2D 選取、人物防穿模拖曳與垃圾桶感應 ---
   function onObjectSelected(e) {{
     const target = e.selected ? e.selected[0] : null;
     if (!target) return;
@@ -1137,7 +1286,6 @@ html_code = f"""
     const target = e.target;
     if (!target) return;
 
-    // 若正在拖曳一般物件，顯示底部垃圾桶感應區
     if (target.itemId && e.e) {{
       const trashEl = document.getElementById("trash-dropzone");
       trashEl.classList.add("show");
@@ -1148,15 +1296,25 @@ html_code = f"""
     }}
 
     if (target.isHuman) {{
-      appState.human.x = Math.round(target.left);
-      appState.human.y = Math.round(target.top);
+      // 2D 拖曳人物時同樣執行碰撞檢測與床高疊加
+      const nx = Math.round(target.left);
+      const ny = Math.round(target.top);
+      const check = checkHumanWalkable(nx, ny);
+      if (check.allowed) {{
+        appState.human.x = nx;
+        appState.human.y = ny;
+        appState.human.z = check.baseZ;
+      }} else {{
+        // 阻擋穿模，退回原合法座標
+        target.set({{ left: appState.human.x, top: appState.human.y }});
+        showToast("⚠️ 人物不可穿越家具物件！");
+      }}
       appState.human.rot = Math.round((target.angle % 360 + 360) % 360);
       initHumanFormValues();
     }} else if (target.itemId) {{
       const item = appState.items.find(i => i.id === target.itemId);
       if (!item) return;
 
-      // 檢測門或物件是否在拉伸時翻轉過軸 (flipX / flipY)
       if (target.flipX) {{
         item.flip_x = !item.flip_x;
         target.set('flipX', false);
@@ -1201,7 +1359,6 @@ html_code = f"""
     renderFullScene();
   }}
 
-  // --- 核心修復：更新左側面板時，絕不覆蓋正在打字的輸入框 (document.activeElement) ---
   function setInputValueSafe(id, val) {{
     const el = document.getElementById(id);
     if (el && document.activeElement !== el) {{
@@ -1217,7 +1374,7 @@ html_code = f"""
     document.getElementById("prop-editor").style.display = "block";
 
     const typeNames = {{
-      furniture: "🛋️ 一般家具",
+      furniture: "🛋️ 家具 / 床",
       door: "🚪 房門 (支援開向翻轉)",
       window: "🪟 窗戶 (3D富士山窗景)",
       socket: "🔌 牆壁插座 (3D擬真)",
@@ -1243,10 +1400,8 @@ html_code = f"""
     document.getElementById("scenery-upload-group").style.display = (item.item_type === "window") ? "flex" : "none";
   }}
 
-  // 局部更新單一 Fabric 物件（不重繪整張畫布，讓連續打多位數超順暢）
   function updateSingleItemVisual(item) {{
     if (item.item_type === "door") {{
-      // 門因為包含圓弧路徑，直接重繪
       renderFullScene();
       return;
     }}
@@ -1270,7 +1425,6 @@ html_code = f"""
     if ((currentMode === "3D" || currentMode === "FPV") && renderer) updateThreeScene();
   }}
 
-  // 綁定左側輸入框事件（連續打字不跳動）
   ["prop-name", "prop-category", "prop-type", "prop-w", "prop-d", "prop-h", "prop-x", "prop-y", "prop-z", "prop-rot", "prop-color"].forEach(id => {{
     document.getElementById(id).addEventListener("input", (e) => {{
       const item = appState.items.find(i => i.id === activeId);
@@ -1288,7 +1442,6 @@ html_code = f"""
       }} else if (id === "prop-color") {{
         item.color = rawVal;
       }} else {{
-        // 數字欄位：若使用者正在清空準備打下一個數字，暫不強制歸零跳動
         if (rawVal === "" || rawVal === "-") return;
         const num = parseFloat(rawVal);
         if (isNaN(num)) return;
@@ -1308,7 +1461,6 @@ html_code = f"""
     }});
   }});
 
-  // 物件旋轉滑桿連動
   document.getElementById("prop-rot-slider").addEventListener("input", e => {{
     const item = appState.items.find(i => i.id === activeId);
     if (!item) return;
@@ -1318,7 +1470,6 @@ html_code = f"""
     updateSingleItemVisual(item);
   }});
 
-  // 房門開向翻轉按鈕
   document.getElementById("btn-door-flip-x").addEventListener("click", () => {{
     const item = appState.items.find(i => i.id === activeId);
     if (!item) return;
@@ -1332,7 +1483,6 @@ html_code = f"""
     renderFullScene();
   }});
 
-  // 窗景與材質貼圖上傳
   document.getElementById("prop-scenery-file").addEventListener("change", function(e) {{
     const file = e.target.files[0];
     if (!file) return;
@@ -1383,7 +1533,7 @@ html_code = f"""
     }} else if (type === 'door') {{
       newItem = {{ id: "door_" + Date.now(), name: "房門", category: chosenCat, item_type: "door", x: 20, y: 346, z: 0, w: 90, d: 14, h: 210, rot: 0, color: "#8B5A2B", texture: "", scenery: "", flip_x: false, flip_y: false }};
     }} else {{
-      newItem = {{ id: "item_" + Date.now(), name: "新家具", category: chosenCat, item_type: "furniture", x: 140, y: 140, z: 0, w: 60, d: 50, h: 30, rot: 0, color: "#38BDF8", texture: "", scenery: "", flip_x: false, flip_y: false }};
+      newItem = {{ id: "item_" + Date.now(), name: chosenCat === "床" ? "雙人床" : "新家具", category: chosenCat, item_type: "furniture", x: 140, y: 140, z: 0, w: chosenCat === "床" ? 152 : 60, d: chosenCat === "床" ? 195 : 50, h: chosenCat === "床" ? 55 : 30, rot: 0, color: chosenCat === "床" ? "#FAD785" : "#38BDF8", texture: "", scenery: "", flip_x: false, flip_y: false }};
     }}
     appState.items.push(newItem);
     activeId = newItem.id;
@@ -1532,7 +1682,6 @@ html_code = f"""
     syncRoomFromInputs();
   }});
 
-  // 牆壁與天花板貼圖上傳
   document.getElementById("wall-texture-file").addEventListener("change", function(e) {{
     const file = e.target.files[0];
     if (!file) return;
@@ -1556,24 +1705,10 @@ html_code = f"""
     reader.readAsDataURL(file);
   }});
 
-  // --- 🚶 人物與第一人稱人類自然視角控制 ---
-  function getHumanEyeHeight() {{
-    const h = appState.human;
-    if (h.posture === "lie") {{
-      // 檢查人物是否在床或其他家具上方，若是則以該家具高度 + 20cm 作為躺姿眼高
-      let baseZ = 35;
-      appState.items.forEach(it => {{
-        if (it.item_type === "furniture" && h.x >= it.x && h.x <= it.x + it.w && h.y >= it.y && h.y <= it.y + it.d) {{
-          baseZ = Math.max(baseZ, (it.z || 0) + (it.h || 50));
-        }}
-      }});
-      return baseZ + 18;
-    }}
-    return Math.round((h.height || 178) * 0.93);
-  }}
-
+  // --- 🚶 人物表單與站/坐/躺三種姿勢同步 ---
   function initHumanFormValues() {{
     const h = appState.human;
+    const eyeH = getHumanEyeHeight();
     setInputValueSafe("human-height", h.height || 178);
     setInputValueSafe("human-x", Math.round(h.x));
     setInputValueSafe("human-y", Math.round(h.y));
@@ -1587,9 +1722,18 @@ html_code = f"""
     document.getElementById("human-pitch-val").innerText = Math.round(h.pitch || 0) + "°";
     document.getElementById("hud-pitch-lbl").innerText = Math.round(h.pitch || 0) + "°";
 
-    document.getElementById("human-eye-info").innerText = `自然眼高: ${{getHumanEyeHeight()}} cm`;
-    document.getElementById("btn-posture-stand").classList.toggle("active", h.posture !== "lie");
-    document.getElementById("btn-posture-lie").classList.toggle("active", h.posture === "lie");
+    document.getElementById("human-eye-info").innerText = `自然眼高: ${{eyeH}} cm`;
+    document.getElementById("human-basez-info").innerText = `踏面高度 Z: ${{Math.round(h.z || 0)}} cm ${{h.z > 0 ? '(已在床上)' : ''}}`;
+    const hudEyeLbl = document.getElementById("hud-eye-height-lbl");
+    if (hudEyeLbl) hudEyeLbl.innerText = `目前眼高: ${{eyeH}} cm (踏面Z:${{Math.round(h.z || 0)}})`;
+
+    const p = h.posture || "stand";
+    ["stand", "sit", "lie"].forEach(mode => {{
+      const b1 = document.getElementById("btn-posture-" + mode);
+      const b2 = document.getElementById("hud-btn-" + mode);
+      if (b1) b1.classList.toggle("active", p === mode);
+      if (b2) b2.classList.toggle("active", p === mode);
+    }});
   }}
 
   ["human-height", "human-x", "human-y", "human-rot", "human-pitch"].forEach(id => {{
@@ -1597,8 +1741,8 @@ html_code = f"""
       if (e.target.value === "" || e.target.value === "-") return;
       const val = parseFloat(e.target.value) || 0;
       if (id === "human-height") appState.human.height = Math.max(60, val);
-      if (id === "human-x") appState.human.x = val;
-      if (id === "human-y") appState.human.y = val;
+      if (id === "human-x") tryMoveHumanTo(val, appState.human.y, true);
+      if (id === "human-y") tryMoveHumanTo(appState.human.x, val, true);
       if (id === "human-rot") appState.human.rot = ((val % 360) + 360) % 360;
       if (id === "human-pitch") appState.human.pitch = Math.max(-85, Math.min(85, val));
       initHumanFormValues();
@@ -1629,33 +1773,34 @@ html_code = f"""
   window.setHumanPosture = function(p) {{
     appState.human.posture = p;
     if (p === "lie") {{
-      appState.human.pitch = 35; // 躺下時預設微抬頭仰角看房間與天花板
+      appState.human.pitch = 35;
       appState.room.show_ceiling = true;
       document.getElementById("room-show-ceiling").checked = true;
+    }} else if (p === "sit") {{
+      appState.human.pitch = -5;
     }} else {{
       appState.human.pitch = 0;
     }}
+    const check = checkHumanWalkable(appState.human.x, appState.human.y);
+    appState.human.z = check.baseZ;
     initHumanFormValues();
     renderFullScene();
     if (currentMode === "FPV") syncFPVCamera();
   }};
 
-  window.placeHumanOnBed = function() {{
-    const bed = appState.items.find(i => i.id === "bed" || i.name.includes("床"));
+  window.placeHumanOnBed = function(targetPosture = 'lie') {{
+    const bed = appState.items.find(i => isBedItem(i));
     if (bed) {{
       appState.human.x = Math.round(bed.x + bed.w / 2);
-      appState.human.y = Math.round(bed.y + bed.d * 0.35);
-      appState.human.rot = 180; // 朝床尾房間方向看
+      appState.human.y = Math.round(bed.y + (targetPosture === 'sit' ? bed.d * 0.78 : bed.d * 0.35));
+      appState.human.z = (bed.z || 0) + (bed.h || 55);
+      appState.human.rot = 180;
     }}
-    setHumanPosture("lie");
+    setHumanPosture(targetPosture);
     enterHumanFPV();
   }};
 
-  window.toggleLieOnBedFPV = function() {{
-    setHumanPosture(appState.human.posture === "lie" ? "stand" : "lie");
-  }};
-
-  // --- 右側分類清單渲染 ---
+  // --- 右側分類清單渲染 (支援滑鼠與觸控拖曳物件至其他分類) ---
   function renderRightPanel() {{
     const container = document.getElementById("item-list-container");
     document.getElementById("obj-count").innerText = `共 ${{appState.items.length}} 項`;
@@ -1673,10 +1818,23 @@ html_code = f"""
       const catItems = appState.items.filter(it => (it.category || appState.categories[0]) === cat);
       const sec = document.createElement("div");
       sec.className = "cat-section";
+      sec.setAttribute("data-cat", cat);
+
+      // 允許拖曳物件卡片放置到此分類區塊
+      sec.addEventListener("dragover", e => {{
+        e.preventDefault();
+        sec.classList.add("drag-over");
+      }});
+      sec.addEventListener("dragleave", () => sec.classList.remove("drag-over"));
+      sec.addEventListener("drop", e => {{
+        e.preventDefault();
+        sec.classList.remove("drag-over");
+        if (draggedItemId) moveItemToCategory(draggedItemId, cat);
+      }});
 
       const header = document.createElement("div");
       header.className = "cat-header";
-      header.innerHTML = `<span>📁 ${{cat}}</span><span style="font-size:11px;color:#64748B;">${{catItems.length}} 項</span>`;
+      header.innerHTML = `<span>📁 ${{cat}} ${{cat === '床' ? '🛏️' : ''}}</span><span style="font-size:11px;color:#64748B;">${{catItems.length}} 項</span>`;
 
       const listBox = document.createElement("div");
       listBox.className = "cat-items";
@@ -1687,12 +1845,62 @@ html_code = f"""
       catItems.forEach(item => {{
         const card = document.createElement("div");
         card.className = "item-card" + (item.id === activeId ? " selected" : "");
+        card.draggable = true;
         card.onclick = () => selectItemById(item.id);
+
+        // 桌面端 HTML5 Drag & Drop
+        card.addEventListener("dragstart", e => {{
+          draggedItemId = item.id;
+          card.classList.add("dragging");
+          e.dataTransfer.setData("text/plain", item.id);
+        }});
+        card.addEventListener("dragend", () => {{
+          card.classList.remove("dragging");
+          draggedItemId = null;
+          document.querySelectorAll(".cat-section").forEach(s => s.classList.remove("drag-over"));
+        }});
+
+        // 手機觸控端長按拖曳改分類支援
+        let touchTimer = null;
+        let isTouchDraggingCard = false;
+        card.addEventListener("touchstart", e => {{
+          touchTimer = setTimeout(() => {{
+            isTouchDraggingCard = true;
+            draggedItemId = item.id;
+            card.classList.add("dragging");
+          }}, 280);
+        }}, {{ passive: true }});
+
+        card.addEventListener("touchmove", e => {{
+          if (!isTouchDraggingCard) {{ clearTimeout(touchTimer); return; }}
+          e.preventDefault();
+          const t = e.touches[0];
+          const elUnder = document.elementFromPoint(t.clientX, t.clientY);
+          document.querySelectorAll(".cat-section").forEach(s => s.classList.remove("drag-over"));
+          const targetSec = elUnder ? elUnder.closest(".cat-section") : null;
+          if (targetSec) targetSec.classList.add("drag-over");
+        }}, {{ passive: false }});
+
+        card.addEventListener("touchend", e => {{
+          clearTimeout(touchTimer);
+          if (!isTouchDraggingCard) return;
+          isTouchDraggingCard = false;
+          card.classList.remove("dragging");
+          const t = e.changedTouches[0];
+          const elUnder = document.elementFromPoint(t.clientX, t.clientY);
+          const targetSec = elUnder ? elUnder.closest(".cat-section") : null;
+          document.querySelectorAll(".cat-section").forEach(s => s.classList.remove("drag-over"));
+          if (targetSec && targetSec.getAttribute("data-cat")) {{
+            moveItemToCategory(item.id, targetSec.getAttribute("data-cat"));
+          }}
+          draggedItemId = null;
+        }});
 
         const b = badgeMap[item.item_type || "furniture"] || badgeMap.furniture;
         card.innerHTML = `
           <div class="item-card-header">
             <div class="name">
+              <span style="color:#64748B;font-size:11px;cursor:grab;">⠿</span>
               <span style="display:inline-block;width:11px;height:11px;border-radius:3px;background:${{item.color}};border:1px solid #fff;"></span>
               <span>${{item.name}}</span>
               <span class="badge ${{b.cls}}">${{b.text}}</span>
@@ -1726,7 +1934,7 @@ html_code = f"""
       }}
     }} else if (currentMode === "3D" && transformControl) {{
       const mesh = selectable3DMeshes.find(m => m.userData.itemId === id);
-      if (mesh) transformControl.attach(mesh);
+      if (mesh) attachGizmoWithRules(mesh);
     }}
     switchLeftTab('item');
     updateLeftItemPanel();
@@ -1758,15 +1966,16 @@ html_code = f"""
 
   // --- 存檔與匯出入 ---
   document.getElementById("btn-save-local").addEventListener("click", () => {{
-    localStorage.setItem("room_planner_v5", JSON.stringify(appState));
+    localStorage.setItem("room_planner_v6", JSON.stringify(appState));
     alert("✅ 已成功儲存於 App 本地記憶中！");
   }});
 
   document.getElementById("btn-load-local").addEventListener("click", () => {{
-    const saved = localStorage.getItem("room_planner_v5") || localStorage.getItem("room_planner_v4");
+    const saved = localStorage.getItem("room_planner_v6") || localStorage.getItem("room_planner_v5");
     if (saved) {{
       appState = JSON.parse(saved);
-      if (!appState.categories) appState.categories = ["大型家具", "收納櫃體", "門窗建材", "機電開關"];
+      if (!appState.categories) appState.categories = ["床", "大型家具", "收納櫃體", "門窗建材", "機電開關"];
+      if (!appState.categories.includes("床")) appState.categories.unshift("床");
       if (!appState.human) appState.human = {{ x: 230, y: 230, z: 0, height: 178, rot: 0, pitch: 0, posture: "stand" }};
       renderCategoryUI();
       initRoomFormValues();
@@ -1797,7 +2006,8 @@ html_code = f"""
     reader.onload = function(evt) {{
       try {{
         appState = JSON.parse(evt.target.result);
-        if (!appState.categories) appState.categories = ["大型家具", "收納櫃體", "門窗建材", "機電開關"];
+        if (!appState.categories) appState.categories = ["床", "大型家具", "收納櫃體", "門窗建材", "機電開關"];
+        if (!appState.categories.includes("床")) appState.categories.unshift("床");
         if (!appState.human) appState.human = {{ x: 230, y: 230, z: 0, height: 178, rot: 0, pitch: 0, posture: "stand" }};
         renderCategoryUI();
         initRoomFormValues();
@@ -1825,13 +2035,167 @@ html_code = f"""
     }}
   }});
 
-  // --- 3D 場景、白牆/天花板、3D點選拖曳拉伸控制器、與第一人稱人類自然視角 ---
+  // --- 建構精緻 3D 擬真關節人形模型 (支援站立、屈膝坐姿、仰躺姿勢) ---
+  function buildRealistic3DHuman(hData) {{
+    const group = new THREE.Group();
+    const stature = hData.height || 178;
+    const s = stature / 175; // 相對比例尺
+    const posture = hData.posture || "stand";
+
+    const skinMat = new THREE.MeshLambertMaterial({{ color: 0xFFDCB1 }});
+    const hairMat = new THREE.MeshLambertMaterial({{ color: 0x1E293B }});
+    const shirtMat = new THREE.MeshLambertMaterial({{ color: 0x3B82F6 }});
+    const pantsMat = new THREE.MeshLambertMaterial({{ color: 0x1E293B }});
+    const shoeMat = new THREE.MeshLambertMaterial({{ color: 0xF8FAFC }});
+    const eyeMat = new THREE.MeshBasicMaterial({{ color: 0x0F172A }});
+
+    // 建立身體組件容器 (用於躺姿或坐姿的整體旋轉與位移)
+    const rig = new THREE.Group();
+
+    // 頭部 + 頭髮 + 雙眼 (朝向本地 -Z)
+    const headGroup = new THREE.Group();
+    const headMesh = new THREE.Mesh(new THREE.SphereGeometry(10.5 * s, 20, 20), skinMat);
+    headGroup.add(headMesh);
+    const hairMesh = new THREE.Mesh(new THREE.SphereGeometry(11 * s, 16, 16, 0, Math.PI * 2, 0, Math.PI * 0.58), hairMat);
+    hairMesh.position.y = 1.5 * s;
+    headGroup.add(hairMesh);
+    // 雙眼標示臉部朝向 (-Z)
+    const eyeL = new THREE.Mesh(new THREE.SphereGeometry(1.4 * s, 8, 8), eyeMat);
+    eyeL.position.set(-3.6 * s, 1 * s, -9.8 * s);
+    const eyeR = new THREE.Mesh(new THREE.SphereGeometry(1.4 * s, 8, 8), eyeMat);
+    eyeR.position.set(3.6 * s, 1 * s, -9.8 * s);
+    headGroup.add(eyeL, eyeR);
+
+    // 頸部
+    const neckMesh = new THREE.Mesh(new THREE.CylinderGeometry(4 * s, 4.5 * s, 8 * s, 12), skinMat);
+
+    // 軀幹 (上衣) + 骨盆
+    const torsoMesh = new THREE.Mesh(new THREE.BoxGeometry(32 * s, 50 * s, 17 * s), shirtMat);
+    const pelvisMesh = new THREE.Mesh(new THREE.BoxGeometry(30 * s, 14 * s, 16 * s), pantsMat);
+
+    // 雙臂 (肩膀圓潤 + 手臂)
+    const armGeo = new THREE.CylinderGeometry(4.2 * s, 3.5 * s, 52 * s, 12);
+    const armL = new THREE.Mesh(armGeo, shirtMat);
+    const armR = new THREE.Mesh(armGeo, shirtMat);
+
+    if (posture === "stand") {{
+      headGroup.position.set(0, 158 * s, 0);
+      neckMesh.position.set(0, 145 * s, 0);
+      torsoMesh.position.set(0, 118 * s, 0);
+      pelvisMesh.position.set(0, 86 * s, 0);
+      armL.position.set(-20 * s, 114 * s, 0);
+      armR.position.set(20 * s, 114 * s, 0);
+
+      // 直立雙腿與鞋子
+      const legGeo = new THREE.CylinderGeometry(6 * s, 4.5 * s, 74 * s, 12);
+      const legL = new THREE.Mesh(legGeo, pantsMat);
+      legL.position.set(-8.5 * s, 43 * s, 0);
+      const legR = new THREE.Mesh(legGeo, pantsMat);
+      legR.position.set(8.5 * s, 43 * s, 0);
+
+      const shoeGeo = new THREE.BoxGeometry(10 * s, 7 * s, 22 * s);
+      const shoeL = new THREE.Mesh(shoeGeo, shoeMat);
+      shoeL.position.set(-8.5 * s, 3.5 * s, -4 * s);
+      const shoeR = new THREE.Mesh(shoeGeo, shoeMat);
+      shoeR.position.set(8.5 * s, 3.5 * s, -4 * s);
+      rig.add(headGroup, neckMesh, torsoMesh, pelvisMesh, armL, armR, legL, legR, shoeL, shoeR);
+
+    }} else if (posture === "sit") {{
+      // 屈膝坐姿：臀部高度在座面 (若在地面則自帶一張隱形高度或坐姿高度)
+      const seatOffset = (hData.z || 0) > 0 ? 0 : 42 * s;
+      pelvisMesh.position.set(0, (8 + seatOffset) * s, 0);
+      torsoMesh.position.set(0, (38 + seatOffset) * s, 0);
+      neckMesh.position.set(0, (66 + seatOffset) * s, 0);
+      headGroup.position.set(0, (78 + seatOffset) * s, 0);
+      armL.position.set(-20 * s, (38 + seatOffset) * s, -6 * s);
+      armL.rotation.x = 0.4;
+      armR.position.set(20 * s, (38 + seatOffset) * s, -6 * s);
+      armR.rotation.x = 0.4;
+
+      // 水平大腿 + 垂直小腿
+      const thighGeo = new THREE.BoxGeometry(11 * s, 11 * s, 38 * s);
+      const thighL = new THREE.Mesh(thighGeo, pantsMat);
+      thighL.position.set(-8.5 * s, (8 + seatOffset) * s, -16 * s);
+      const thighR = new THREE.Mesh(thighGeo, pantsMat);
+      thighR.position.set(8.5 * s, (8 + seatOffset) * s, -16 * s);
+
+      const calfGeo = new THREE.CylinderGeometry(5 * s, 4 * s, 42 * s, 12);
+      const calfL = new THREE.Mesh(calfGeo, pantsMat);
+      calfL.position.set(-8.5 * s, (-12 + seatOffset) * s, -32 * s);
+      const calfR = new THREE.Mesh(calfGeo, pantsMat);
+      calfR.position.set(8.5 * s, (-12 + seatOffset) * s, -32 * s);
+
+      rig.add(headGroup, neckMesh, torsoMesh, pelvisMesh, armL, armR, thighL, thighR, calfL, calfR);
+
+    }} else {{
+      // 躺姿 (仰躺在床/地面，臉朝上略偏前方 -Z)
+      headGroup.position.set(0, 18 * s, 52 * s);
+      headGroup.rotation.x = Math.PI / 2.3;
+      neckMesh.position.set(0, 12 * s, 38 * s);
+      neckMesh.rotation.x = Math.PI / 2;
+      torsoMesh.position.set(0, 10 * s, 8 * s);
+      torsoMesh.rotation.x = Math.PI / 2;
+      pelvisMesh.position.set(0, 9 * s, -22 * s);
+      pelvisMesh.rotation.x = Math.PI / 2;
+      armL.position.set(-21 * s, 9 * s, 8 * s);
+      armL.rotation.x = Math.PI / 2;
+      armR.position.set(21 * s, 9 * s, 8 * s);
+      armR.rotation.x = Math.PI / 2;
+
+      const legGeo = new THREE.CylinderGeometry(5.8 * s, 4.5 * s, 70 * s, 12);
+      const legL = new THREE.Mesh(legGeo, pantsMat);
+      legL.rotation.x = Math.PI / 2;
+      legL.position.set(-8.5 * s, 8 * s, -62 * s);
+      const legR = new THREE.Mesh(legGeo, pantsMat);
+      legR.rotation.x = Math.PI / 2;
+      legR.position.set(8.5 * s, 8 * s, -62 * s);
+
+      rig.add(headGroup, neckMesh, torsoMesh, pelvisMesh, armL, armR, legL, legR);
+    }}
+
+    // 視線方向指示光錐 (標示眼睛看出去的方向)
+    const eyeLocalY = getHumanEyeHeight() - (hData.z || 0);
+    const coneGeo = new THREE.ConeGeometry(11, 38, 12);
+    coneGeo.rotateX(-Math.PI / 2);
+    const coneMesh = new THREE.Mesh(coneGeo, new THREE.MeshBasicMaterial({{ color: 0xA855F7, wireframe: true }}));
+    coneMesh.position.set(0, eyeLocalY, -28);
+    rig.add(coneMesh);
+
+    group.add(rig);
+    group.position.set(hData.x, hData.z || 0, hData.y);
+    group.rotation.y = -(hData.rot || 0) * Math.PI / 180;
+    group.userData = {{ isHuman: true }};
+    return group;
+  }}
+
+  // 根據選取的是「人物」還是「一般家具」，自動鎖定人物的垂直 Y 軸與 Scale，避免手機誤觸改到身高！
+  function attachGizmoWithRules(mesh) {{
+    if (!transformControl || !mesh) return;
+    transformControl.attach(mesh);
+    if (mesh.userData.isHuman) {{
+      // 人物：禁止在 3D 畫面縮放身高，且移動時鎖定垂直 Y 軸
+      if (gizmoMode === "scale") {{
+        transformControl.setMode("translate");
+      }} else {{
+        transformControl.setMode(gizmoMode);
+      }}
+      transformControl.showY = (transformControl.getMode() === "rotate");
+      transformControl.showX = (transformControl.getMode() !== "rotate");
+      transformControl.showZ = (transformControl.getMode() !== "rotate");
+    }} else {{
+      transformControl.setMode(gizmoMode);
+      transformControl.showX = true;
+      transformControl.showY = true;
+      transformControl.showZ = true;
+    }}
+  }}
+
+  // --- 3D 場景、點擊地板/床面走過去、防穿模與第一人稱人類自然視角 ---
   function initThree() {{
     const container = document.getElementById("three-container");
     scene = new THREE.Scene();
     scene.background = new THREE.Color(0x0B0F17);
 
-    // 採用自然人類視角廣角 68 度 FOV
     camera = new THREE.PerspectiveCamera(68, container.clientWidth / container.clientHeight, 2, 6000);
     camera.position.set(appState.room.width / 2, 420, appState.room.depth + 340);
 
@@ -1844,7 +2208,6 @@ html_code = f"""
     controls.enableDamping = true;
     controls.target.set(appState.room.width / 2, 60, appState.room.depth / 2);
 
-    // 3D 物件直接拖曳、旋轉、拉伸控制器 (TransformControls)
     transformControl = new THREE.TransformControls(camera, renderer.domElement);
     transformControl.addEventListener('dragging-changed', function(event) {{
       if (currentMode === "3D") controls.enabled = !event.value;
@@ -1864,8 +2227,18 @@ html_code = f"""
       if (!transformControl.object) return;
       const obj = transformControl.object;
       if (obj.userData.isHuman) {{
-        appState.human.x = Math.round(obj.position.x);
-        appState.human.y = Math.round(obj.position.z);
+        // 3D 拖曳人物時：強制鎖定不可縮放身高，並進行碰撞防穿模與床高疊加檢測
+        obj.scale.set(1, 1, 1);
+        const nx = Math.round(obj.position.x);
+        const ny = Math.round(obj.position.z);
+        const check = checkHumanWalkable(nx, ny);
+        if (check.allowed) {{
+          appState.human.x = nx;
+          appState.human.y = ny;
+          appState.human.z = check.baseZ;
+        }}
+        // 強制將 3D 人物固定在合法位置與踏面高度 baseZ (絕不允許垂直拉高)
+        obj.position.set(appState.human.x, appState.human.z || 0, appState.human.y);
         appState.human.rot = Math.round((-obj.rotation.y * 180 / Math.PI % 360 + 360) % 360);
         initHumanFormValues();
       }} else if (obj.userData.itemId) {{
@@ -1886,13 +2259,13 @@ html_code = f"""
     }});
     scene.add(transformControl);
 
-    // 3D 點選物件 (Raycaster) 與 FPV 轉頭控制
+    // 點擊選取物件 或 點擊地板/床面讓人物自動走過去
     const raycaster = new THREE.Raycaster();
     const mouse = new THREE.Vector2();
-    let downX = 0, downY = 0;
+    let downX = 0, downY = 0, downTime = 0;
 
     renderer.domElement.addEventListener('pointerdown', function(e) {{
-      downX = e.clientX; downY = e.clientY;
+      downX = e.clientX; downY = e.clientY; downTime = Date.now();
       if (currentMode === "FPV") {{
         isLookingFPV = true;
         fpvLastX = e.clientX;
@@ -1901,14 +2274,12 @@ html_code = f"""
     }});
 
     renderer.domElement.addEventListener('pointermove', function(e) {{
-      // 3D 拖曳進垃圾桶偵測
       if (transformControl && transformControl.dragging) {{
         const trashEl = document.getElementById("trash-dropzone");
         const rect = trashEl.getBoundingClientRect();
         isOverTrash = (e.clientX >= rect.left - 20 && e.clientX <= rect.right + 20 && e.clientY >= rect.top - 20 && e.clientY <= rect.bottom + 20);
         trashEl.classList.toggle("hover", isOverTrash);
       }}
-      // FPV 滑鼠/單指轉頭看四周與仰視
       if (currentMode === "FPV" && isLookingFPV) {{
         const dx = e.clientX - fpvLastX;
         const dy = e.clientY - fpvLastY;
@@ -1923,34 +2294,68 @@ html_code = f"""
 
     renderer.domElement.addEventListener('pointerup', function(e) {{
       isLookingFPV = false;
-      if (currentMode !== "3D") return;
-      if (Math.hypot(e.clientX - downX, e.clientY - downY) > 6) return; // 排除旋轉視角拖曳
+      const moveDist = Math.hypot(e.clientX - downX, e.clientY - downY);
+      const elapsed = Date.now() - downTime;
+      if (moveDist > 8 || elapsed > 500) return; // 區分輕點(Tap)與拖曳旋轉視角
 
       const rect = renderer.domElement.getBoundingClientRect();
       mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
       mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
       raycaster.setFromCamera(mouse, camera);
 
-      const intersects = raycaster.intersectObjects(selectable3DMeshes, true);
-      if (intersects.length > 0) {{
-        let hit = intersects[0].object;
-        while (hit.parent && !hit.userData.itemId && !hit.userData.isHuman) {{
-          hit = hit.parent;
+      // 1. 在 FPV 人類視角下輕點畫面：計算點擊方向或地板目標點，讓人物朝該處走過去
+      if (currentMode === "FPV") {{
+        const walkHits = raycaster.intersectObjects(walkable3DMeshes, true);
+        if (walkHits.length > 0) {{
+          const pt = walkHits[0].point;
+          triggerWalkToTarget(pt.x, pt.z);
+        }} else {{
+          // 若點擊前方視野水平處，往視線方向前進 55cm
+          const yawRad = (appState.human.rot || 0) * Math.PI / 180;
+          triggerWalkToTarget(appState.human.x + Math.sin(yawRad) * 55, appState.human.y - Math.cos(yawRad) * 55);
         }}
-        if (hit.userData.isHuman) {{
-          activeId = "HUMAN";
-          transformControl.attach(hit);
-          switchLeftTab('human');
-          initHumanFormValues();
-        }} else if (hit.userData.itemId) {{
-          activeId = hit.userData.itemId;
-          transformControl.attach(hit);
-          switchLeftTab('item');
-          updateLeftItemPanel();
-          highlightRightPanel();
+        return;
+      }}
+
+      // 2. 在 3D 鳥瞰模式下輕點畫面：優先檢查是否點選了物件，若點擊地板或床面則讓人物走過去
+      if (currentMode === "3D") {{
+        const intersects = raycaster.intersectObjects(selectable3DMeshes, true);
+        if (intersects.length > 0) {{
+          let hit = intersects[0].object;
+          while (hit.parent && !hit.userData.itemId && !hit.userData.isHuman) {{
+            hit = hit.parent;
+          }}
+          if (hit.userData.isHuman) {{
+            activeId = "HUMAN";
+            attachGizmoWithRules(hit);
+            switchLeftTab('human');
+            initHumanFormValues();
+            return;
+          }} else if (hit.userData.itemId) {{
+            const hitItem = appState.items.find(i => i.id === hit.userData.itemId);
+            // 若目前已選中人物，且點擊的是「床」，則直接讓人物走上床！
+            if (activeId === "HUMAN" && hitItem && isBedItem(hitItem)) {{
+              const pt = intersects[0].point;
+              triggerWalkToTarget(pt.x, pt.z);
+              return;
+            }}
+            activeId = hit.userData.itemId;
+            attachGizmoWithRules(hit);
+            switchLeftTab('item');
+            updateLeftItemPanel();
+            highlightRightPanel();
+            return;
+          }}
         }}
-      }} else if (!transformControl.dragging) {{
-        transformControl.detach();
+
+        // 若點擊的是地板空白處，直接讓人物走向該點擊位置！
+        const floorHits = raycaster.intersectObjects(walkable3DMeshes, true);
+        if (floorHits.length > 0) {{
+          const pt = floorHits[0].point;
+          triggerWalkToTarget(pt.x, pt.z);
+        }} else if (!transformControl.dragging) {{
+          transformControl.detach();
+        }}
       }}
     }});
 
@@ -1963,35 +2368,63 @@ html_code = f"""
     animateThree();
   }}
 
+  // 觸發人物自動走向目標點 (tx, ty)
+  function triggerWalkToTarget(tx, ty) {{
+    walkTarget = {{ x: tx, y: ty }};
+    // 自動將人物面向轉向目標點
+    const dx = tx - appState.human.x;
+    const dy = ty - appState.human.y;
+    if (Math.hypot(dx, dy) > 2) {{
+      let deg = Math.atan2(dx, -dy) * 180 / Math.PI;
+      appState.human.rot = Math.round((deg % 360 + 360) % 360);
+    }}
+    if (targetRingMesh) {{
+      const check = checkHumanWalkable(tx, ty);
+      targetRingMesh.position.set(tx, (check.baseZ || 0) + 1.5, ty);
+      targetRingMesh.visible = true;
+    }}
+  }}
+
   window.set3DGizmoMode = function(mode) {{
     gizmoMode = mode;
-    if (transformControl) transformControl.setMode(mode);
     document.getElementById("btn-3d-translate").classList.toggle("active", mode === "translate");
     document.getElementById("btn-3d-rotate").classList.toggle("active", mode === "rotate");
     document.getElementById("btn-3d-scale").classList.toggle("active", mode === "scale");
+    if (transformControl && transformControl.object) {{
+      attachGizmoWithRules(transformControl.object);
+    }}
   }};
 
   function updateThreeScene() {{
     if (!scene) return;
     if (transformControl) transformControl.detach();
     selectable3DMeshes = [];
+    walkable3DMeshes = [];
 
-    // 保留燈光與 TransformControls
     const keep = [scene.children[0], scene.children[1], transformControl];
     scene.children = keep.filter(Boolean);
 
     const rw = appState.room.width, rd = appState.room.depth, rh = appState.room.height;
     const texLoader = new THREE.TextureLoader();
 
-    // 1. 地板
+    // 1. 地板 (加入 walkable3DMeshes 供點擊移動)
     const floorGeo = new THREE.PlaneGeometry(rw, rd);
     const floorMat = new THREE.MeshLambertMaterial({{ color: 0x5089C6, side: THREE.DoubleSide }});
     const floor = new THREE.Mesh(floorGeo, floorMat);
     floor.rotation.x = -Math.PI / 2;
     floor.position.set(rw / 2, 0, rd / 2);
     scene.add(floor);
+    walkable3DMeshes.push(floor);
 
-    // 2. 四周實體白牆 (可勾選開關 + 支援上傳貼圖)
+    // 點擊走動目標指示光圈
+    const ringGeo = new THREE.RingGeometry(8, 13, 24);
+    ringGeo.rotateX(-Math.PI / 2);
+    targetRingMesh = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({{ color: 0x38BDF8, side: THREE.DoubleSide }}));
+    targetRingMesh.visible = !!walkTarget;
+    if (walkTarget) targetRingMesh.position.set(walkTarget.x, (appState.human.z || 0) + 1.5, walkTarget.y);
+    scene.add(targetRingMesh);
+
+    // 2. 四周實體白牆
     if (appState.room.show_walls) {{
       let wallMat;
       if (appState.room.wall_texture) {{
@@ -2001,10 +2434,9 @@ html_code = f"""
           color: appState.room.wall_color || "#F8FAFC",
           side: THREE.DoubleSide,
           transparent: currentMode === "3D",
-          opacity: currentMode === "3D" ? 0.55 : 1.0 // 鳥瞰模式半透明不擋視線，人類視角全實體白牆
+          opacity: currentMode === "3D" ? 0.52 : 1.0
         }});
       }}
-      // 北牆(y=0)、南牆(y=rd)、西牆(x=0)、東牆(x=rw)
       const wNorth = new THREE.Mesh(new THREE.PlaneGeometry(rw, rh), wallMat);
       wNorth.position.set(rw / 2, rh / 2, 0);
       const wSouth = new THREE.Mesh(new THREE.PlaneGeometry(rw, rh), wallMat);
@@ -2018,7 +2450,7 @@ html_code = f"""
       scene.add(wNorth, wSouth, wWest, wEast);
     }}
 
-    // 3. 天花板 (可勾選開關 + 支援上傳貼圖)
+    // 3. 天花板
     if (appState.room.show_ceiling) {{
       let ceilMat;
       if (appState.room.ceiling_texture) {{
@@ -2032,12 +2464,10 @@ html_code = f"""
       scene.add(ceilMesh);
     }}
 
-    // 空間外框線
     const wallLine = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(rw, rh, rd)), new THREE.LineBasicMaterial({{ color: 0x475569 }}));
     wallLine.position.set(rw / 2, rh / 2, rd / 2);
     scene.add(wallLine);
 
-    // 4. 留白處
     appState.voids.forEach(v => {{
       const voidMesh = new THREE.Mesh(new THREE.PlaneGeometry(v.w, v.d), new THREE.MeshBasicMaterial({{ color: 0xffffff, side: THREE.DoubleSide }}));
       voidMesh.rotation.x = -Math.PI / 2;
@@ -2045,39 +2475,17 @@ html_code = f"""
       scene.add(voidMesh);
     }});
 
-    // 5. 3D 人物阿凡達模型 (在 3D 鳥瞰模式下顯示，可直接拖曳移動與旋轉面向)
+    // 4. 3D 擬真關節人形模型 (在 3D 鳥瞰模式下顯示)
     if (currentMode === "3D") {{
-      const h = appState.human;
-      const humanGroup = new THREE.Group();
-      const totalH = h.posture === "lie" ? 45 : (h.height || 178);
-      // 身體圓柱 + 頭部球體 + 視線方向箭頭
-      const bodyGeo = new THREE.CylinderGeometry(14, 14, totalH * 0.78, 16);
-      const bodyMat = new THREE.MeshLambertMaterial({{ color: 0x9333EA }});
-      const bodyMesh = new THREE.Mesh(bodyGeo, bodyMat);
-      bodyMesh.position.y = totalH * 0.39;
-      humanGroup.add(bodyMesh);
-
-      const headGeo = new THREE.SphereGeometry(13, 16, 16);
-      const headMesh = new THREE.Mesh(headGeo, new THREE.MeshLambertMaterial({{ color: 0xFDE047 }}));
-      headMesh.position.y = totalH * 0.88;
-      humanGroup.add(headMesh);
-
-      // 視線方向指示錐 (朝向本地 -Z)
-      const coneGeo = new THREE.ConeGeometry(12, 42, 12);
-      coneGeo.rotateX(-Math.PI / 2);
-      const coneMesh = new THREE.Mesh(coneGeo, new THREE.MeshBasicMaterial({{ color: 0x38BDF8, wireframe: true }}));
-      coneMesh.position.set(0, totalH * 0.85, -28);
-      humanGroup.add(coneMesh);
-
-      humanGroup.position.set(h.x, 0, h.y);
-      humanGroup.rotation.y = -(h.rot || 0) * Math.PI / 180;
-      humanGroup.userData = {{ isHuman: true }};
-      scene.add(humanGroup);
-      selectable3DMeshes.push(humanGroup);
-      if (activeId === "HUMAN") transformControl.attach(humanGroup);
+      human3DGroup = buildRealistic3DHuman(appState.human);
+      scene.add(human3DGroup);
+      selectable3DMeshes.push(human3DGroup);
+      if (activeId === "HUMAN") attachGizmoWithRules(human3DGroup);
+    }} else {{
+      human3DGroup = null;
     }}
 
-    // 6. 繪製所有家具、門、窗戶、插座與開關
+    // 5. 繪製所有家具、床、門、窗戶、插座與開關
     appState.items.forEach(item => {{
       const h = item.h || 30;
       const zBottom = item.z || 0;
@@ -2089,7 +2497,6 @@ html_code = f"""
         const fDepth = Math.max(item.d, 8);
         const frameGeo = new THREE.BoxGeometry(item.w, h, fDepth);
         itemMesh.add(new THREE.LineSegments(new THREE.EdgesGeometry(frameGeo), new THREE.LineBasicMaterial({{ color: 0xF59E0B, linewidth: 3 }})));
-
         const sceneryTex = texLoader.load(item.scenery || appState.default_fuji);
         const glassMesh = new THREE.Mesh(new THREE.BoxGeometry(Math.max(4, item.w - 4), Math.max(4, h - 4), fDepth * 0.5), new THREE.MeshBasicMaterial({{ map: sceneryTex }}));
         itemMesh.add(glassMesh);
@@ -2131,12 +2538,10 @@ html_code = f"""
         itemMesh = new THREE.Group();
         const w = item.w, d = Math.max(item.d, 8);
         itemMesh.add(new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(w + 6, h + 3, d + 2)), new THREE.LineBasicMaterial({{ color: 0x451A03 }})));
-
         const panelMat = item.texture ? new THREE.MeshLambertMaterial({{ map: texLoader.load(item.texture) }}) : new THREE.MeshLambertMaterial({{ color: item.color || 0x8B5A2B }});
         const panelMesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d * 0.75), panelMat);
         itemMesh.add(panelMesh);
 
-        // 依據 flip_x 決定門把在左邊或右邊
         const handleSide = item.flip_x ? -1 : 1;
         const handleMat = new THREE.MeshLambertMaterial({{ color: 0xFBBF24 }});
         const handleAxis = new THREE.Mesh(new THREE.BoxGeometry(3, 3, d + 8), handleMat);
@@ -2160,8 +2565,13 @@ html_code = f"""
       scene.add(itemMesh);
       selectable3DMeshes.push(itemMesh);
 
+      // 若此物件為「床」，加入 walkable3DMeshes 讓點擊床面也能走上去
+      if (isBedItem(item)) {{
+        walkable3DMeshes.push(itemMesh);
+      }}
+
       if (currentMode === "3D" && activeId === item.id) {{
-        transformControl.attach(itemMesh);
+        attachGizmoWithRules(itemMesh);
       }}
     }});
   }}
@@ -2176,22 +2586,12 @@ html_code = f"""
     const yawRad = (h.rot || 0) * Math.PI / 180;
     const pitchRad = (h.pitch || 0) * Math.PI / 180;
 
-    // 0 度朝向北方 (-Z)，90 度朝向東方 (+X)
     const dirX = Math.sin(yawRad) * Math.cos(pitchRad);
     const dirY = Math.sin(pitchRad);
     const dirZ = -Math.cos(yawRad) * Math.cos(pitchRad);
 
     camera.lookAt(h.x + dirX * 100, eyeY + dirY * 100, h.y + dirZ * 100);
   }}
-
-  window.startMoveFPV = function(right, forward) {{
-    fpvMoveDir.right = right;
-    fpvMoveDir.forward = forward;
-  }};
-  window.stopMoveFPV = function() {{
-    fpvMoveDir.right = 0;
-    fpvMoveDir.forward = 0;
-  }};
 
   window.enterHumanFPV = function() {{
     currentMode = "FPV";
@@ -2207,30 +2607,66 @@ html_code = f"""
     if (!renderer) initThree();
     controls.enabled = false;
     if (transformControl) transformControl.detach();
+    const check = checkHumanWalkable(appState.human.x, appState.human.y);
+    appState.human.z = check.baseZ;
+    initHumanFormValues();
     updateThreeScene();
     syncFPVCamera();
   }};
 
   window.exitHumanFPV = function() {{
-    // 離開人類視角時，自動切換回 3D 鳥瞰並同步人物移動後的新位置
+    walkTarget = null;
     document.getElementById("btn-mode-3d").click();
     renderFullScene();
   }};
 
   function animateThree() {{
     requestAnimationFrame(animateThree);
-    if (currentMode === "FPV") {{
-      if (fpvMoveDir.forward !== 0 || fpvMoveDir.right !== 0) {{
-        const speed = 3.2;
-        const yawRad = (appState.human.rot || 0) * Math.PI / 180;
-        const fx = Math.sin(yawRad), fz = -Math.cos(yawRad);
-        const rx = Math.cos(yawRad), rz = Math.sin(yawRad);
-        appState.human.x = Math.round(appState.human.x + (fx * fpvMoveDir.forward + rx * fpvMoveDir.right) * speed);
-        appState.human.y = Math.round(appState.human.y + (fz * fpvMoveDir.forward + rz * fpvMoveDir.right) * speed);
-        initHumanFormValues();
-        syncFPVCamera();
+
+    // 1. 處理點擊地面/床面的平滑自動走動 (3D 與 FPV 皆適用，且具防穿模與上床疊加高度)
+    if (walkTarget) {{
+      const dx = walkTarget.x - appState.human.x;
+      const dy = walkTarget.y - appState.human.y;
+      const dist = Math.hypot(dx, dy);
+      if (dist < 3.5) {{
+        tryMoveHumanTo(Math.round(walkTarget.x), Math.round(walkTarget.y), false);
+        walkTarget = null;
+        if (targetRingMesh) targetRingMesh.visible = false;
+      }} else {{
+        const step = Math.min(dist, 3.8);
+        const nx = appState.human.x + (dx / dist) * step;
+        const ny = appState.human.y + (dy / dist) * step;
+        const moved = tryMoveHumanTo(nx, ny, true);
+        if (!moved) {{
+          walkTarget = null;
+          if (targetRingMesh) targetRingMesh.visible = false;
+        }}
       }}
-    }} else if (controls && controls.enabled) {{
+      if (human3DGroup) {{
+        human3DGroup.position.set(appState.human.x, appState.human.z || 0, appState.human.y);
+        human3DGroup.rotation.y = -(appState.human.rot || 0) * Math.PI / 180;
+      }}
+      initHumanFormValues();
+      if (currentMode === "FPV") syncFPVCamera();
+    }}
+
+    // 2. 處理方向鍵 / 虛擬搖桿持續移動 (具碰撞防穿模與床高疊加)
+    if (fpvMoveDir.forward !== 0 || fpvMoveDir.right !== 0) {{
+      const speed = 3.2;
+      const yawRad = (appState.human.rot || 0) * Math.PI / 180;
+      const fx = Math.sin(yawRad), fz = -Math.cos(yawRad);
+      const rx = Math.cos(yawRad), rz = Math.sin(yawRad);
+      const nx = appState.human.x + (fx * fpvMoveDir.forward + rx * fpvMoveDir.right) * speed;
+      const ny = appState.human.y + (fz * fpvMoveDir.forward + rz * fpvMoveDir.right) * speed;
+      tryMoveHumanTo(nx, ny, true);
+      if (human3DGroup) {{
+        human3DGroup.position.set(appState.human.x, appState.human.z || 0, appState.human.y);
+      }}
+      initHumanFormValues();
+      if (currentMode === "FPV") syncFPVCamera();
+    }}
+
+    if (currentMode !== "FPV" && controls && controls.enabled) {{
       controls.update();
     }}
     if (renderer && scene && camera) renderer.render(scene, camera);
@@ -2239,6 +2675,7 @@ html_code = f"""
   // --- 頂部模式切換 (2D / 3D鳥瞰互動 / 3D人類視角) ---
   document.getElementById("btn-mode-2d").addEventListener("click", () => {{
     currentMode = "2D";
+    walkTarget = null;
     document.getElementById("btn-mode-2d").classList.add("active");
     document.getElementById("btn-mode-3d").classList.remove("active");
     document.getElementById("btn-mode-fpv").classList.remove("active");
@@ -2252,6 +2689,7 @@ html_code = f"""
 
   document.getElementById("btn-mode-3d").addEventListener("click", () => {{
     currentMode = "3D";
+    walkTarget = null;
     document.getElementById("btn-mode-3d").classList.add("active");
     document.getElementById("btn-mode-2d").classList.remove("active");
     document.getElementById("btn-mode-fpv").classList.remove("active");
