@@ -1,437 +1,652 @@
 import streamlit as st
-import plotly.graph_objects as go
-import pandas as pd
-import numpy as np
+import streamlit.components.v1 as components
+import json
 
-# 設置頁面標題與佈局
 st.set_page_config(
-    page_title="臥室空間設計 & 坐向方位規劃",
+    page_title="臥室空間設計 & 互動編輯系統",
     page_icon="📐",
     layout="wide"
 )
 
-# --- 1. 預設數據初始化 (完美對照附圖內容) ---
-DEFAULT_ROOM = {
-    "width": 460,   # 房間總寬度 (X軸, cm)
-    "depth": 360,   # 房間總深度 (Y軸, cm)
-    "height": 280   # 房間天花板高 (Z軸, cm)
-}
-
-# 附圖中的所有物件預設值
-DEFAULT_OBJECTS = [
-    {
-        "id": "obj_bed",
-        "name": "床",
-        "w": 152, "d": 195, "h": 55,
-        "x": 200, "y": 140,
-        "color": "#FAD785",
-        "text_color": "#FFFFFF",
-        "label": "195 x 152\n床"
-    },
-    {
-        "id": "obj_stand_l",
-        "name": "床頭櫃 (左)",
-        "w": 25, "d": 40, "h": 45,
-        "x": 175, "y": 295,
-        "color": "#FAD785",
-        "text_color": "#FFFFFF",
-        "label": "40x25\n床頭櫃"
-    },
-    {
-        "id": "obj_stand_r",
-        "name": "床頭櫃 (右)",
-        "w": 25, "d": 40, "h": 45,
-        "x": 352, "y": 295,
-        "color": "#FAD785",
-        "text_color": "#FFFFFF",
-        "label": "40x25\n床頭櫃"
-    },
-    {
-        "id": "obj_wardrobe_new",
-        "name": "新衣櫃",
-        "w": 121, "d": 72, "h": 210,
-        "x": 30, "y": 260,
-        "color": "#A0CB88",
-        "text_color": "#FFFFFF",
-        "label": "72 x 121 新衣櫃"
-    },
-    {
-        "id": "obj_desk",
-        "name": "書桌",
-        "w": 123, "d": 71, "h": 75,
-        "x": 30, "y": 150,
-        "color": "#8232FA",
-        "text_color": "#FFFFFF",
-        "label": "123 x 71 書桌"
-    },
-    {
-        "id": "obj_drybox",
-        "name": "防潮箱",
-        "w": 40, "d": 45, "h": 50,
-        "x": 265, "y": 50,
-        "color": "#DC7CF5",
-        "text_color": "#FFFFFF",
-        "label": "45 x 40\n防潮箱"
-    },
-    {
-        "id": "obj_wardrobe_white",
-        "name": "白衣櫃",
-        "w": 60, "d": 55, "h": 190,
-        "x": 305, "y": 50,
-        "color": "#AADE8D",
-        "text_color": "#FFFFFF",
-        "label": "55 x 60\n白衣櫃"
-    },
-    {
-        "id": "obj_wardrobe_old",
-        "name": "舊衣櫃",
-        "w": 120, "d": 51, "h": 200,
-        "x": 365, "y": 50,
-        "color": "#9EC484",
-        "text_color": "#FFFFFF",
-        "label": "51 x 120 舊衣櫃"
-    },
-    {
-        "id": "obj_bookcase",
-        "name": "玻書櫃",
-        "w": 32, "d": 63, "h": 180,
-        "x": 450, "y": 180,
-        "color": "#DC7CF5",
-        "text_color": "#FFFFFF",
-        "label": "63 x 32 玻書櫃"
-    }
-]
-
-# 留白 (右上缺口/凹位)
-DEFAULT_VOID = {
-    "x": 380, "y": 240, "w": 100, "d": 120, "color": "#FFFFFF", "label": "留白空間"
-}
-
-# 窗戶 (底部)
+# --- 預設格局與物件數據 (公分 cm) ---
+DEFAULT_ROOM = {"width": 460, "depth": 360, "height": 280}
+DEFAULT_COMPASS = {"x": 255, "y": 185}
+DEFAULT_VOID = {"x": 370, "y": 240, "w": 90, "d": 120}
 DEFAULT_WINDOWS = [
-    {"x": 65, "y": 38, "w": 130, "d": 12, "color": "#FDB813", "label": "窗戶 (主)"},
-    {"x": 355, "y": 38, "w": 20, "d": 12, "color": "#FDB813", "label": "小窗"}
+    {"x": 65, "y": 38, "w": 130, "d": 12},
+    {"x": 355, "y": 38, "w": 20, "d": 12}
 ]
 
-# Session State 初始化
-if "room" not in st.session_state:
-    st.session_state.room = DEFAULT_ROOM.copy()
-if "objects" not in st.session_state:
-    st.session_state.objects = [dict(item) for item in DEFAULT_OBJECTS]
-if "void_area" not in st.session_state:
-    st.session_state.void_area = DEFAULT_VOID.copy()
-if "windows" not in st.session_state:
-    st.session_state.windows = [dict(item) for item in DEFAULT_WINDOWS]
+# 附圖原始預設家具
+DEFAULT_ITEMS = [
+    {"id": "bed", "name": "床", "x": 200, "y": 140, "w": 152, "d": 195, "h": 55, "rot": 0, "color": "#FAD785", "texture": ""},
+    {"id": "stand_l", "name": "床頭櫃(左)", "x": 175, "y": 295, "w": 25, "d": 40, "h": 45, "rot": 0, "color": "#FAD785", "texture": ""},
+    {"id": "stand_r", "name": "床頭櫃(右)", "x": 352, "y": 295, "w": 25, "d": 40, "h": 45, "rot": 0, "color": "#FAD785", "texture": ""},
+    {"id": "wardrobe_new", "name": "新衣櫃", "x": 30, "y": 260, "w": 121, "d": 72, "h": 210, "rot": 0, "color": "#A0CB88", "texture": ""},
+    {"id": "desk", "name": "書桌", "x": 30, "y": 150, "w": 123, "d": 71, "h": 75, "rot": 0, "color": "#8232FA", "texture": ""},
+    {"id": "drybox", "name": "防潮箱", "x": 265, "y": 50, "w": 40, "d": 45, "h": 50, "rot": 0, "color": "#DC7CF5", "texture": ""},
+    {"id": "wardrobe_white", "name": "白衣櫃", "x": 305, "y": 50, "w": 60, "d": 55, "h": 190, "rot": 0, "color": "#AADE8D", "texture": ""},
+    {"id": "wardrobe_old", "name": "舊衣櫃", "x": 365, "y": 50, "w": 120, "d": 51, "h": 200, "rot": 0, "color": "#9EC484", "texture": ""},
+    {"id": "bookcase", "name": "玻書櫃", "x": 450, "y": 180, "w": 32, "d": 63, "h": 180, "rot": 0, "color": "#DC7CF5", "texture": ""}
+]
 
-# 方位中心 (放射線交叉點，預設位在床的靠前中心點)
-if "compass_center" not in st.session_state:
-    st.session_state.compass_center = {"x": 260, "y": 200}
+initial_data_json = json.dumps({
+    "room": DEFAULT_ROOM,
+    "compass": DEFAULT_COMPASS,
+    "void": DEFAULT_VOID,
+    "windows": DEFAULT_WINDOWS,
+    "items": DEFAULT_ITEMS
+})
 
-# --- 側邊欄控制面板 ---
-st.sidebar.title("🛠️ 平面與格局設定")
+html_code = f"""
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/fabric.js/5.3.1/fabric.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+  <style>
+    * {{ box-sizing: border-box; margin: 0; padding: 0; user-select: none; }}
+    body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; background: #0E1117; color: #E0E0E0; overflow: hidden; }}
+    .app-container {{ display: flex; height: 100vh; width: 100vw; }}
+    
+    /* 左側編輯面板 */
+    .left-panel {{ width: 280px; background: #181B20; border-right: 1px solid #2B303A; padding: 16px; display: flex; flex-direction: column; gap: 12px; overflow-y: auto; }}
+    /* 中間畫布區域 */
+    .center-canvas {{ flex: 1; display: flex; flex-direction: column; position: relative; background: #0A0D10; }}
+    /* 右側清單面板 */
+    .right-panel {{ width: 260px; background: #181B20; border-left: 1px solid #2B303A; padding: 16px; display: flex; flex-direction: column; overflow-y: auto; }}
 
-view_mode = st.sidebar.radio("📐 檢視模式切換", ["2D 平面配置圖", "3D 空間建模視圖"], index=0)
+    .toolbar {{ height: 50px; background: #15181E; border-bottom: 1px solid #2B303A; display: flex; align-items: center; justify-content: space-between; padding: 0 16px; }}
+    .btn-group {{ display: flex; gap: 8px; }}
+    button {{ background: #262B35; color: #FFF; border: 1px solid #3A4150; padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 500; transition: all 0.2s; }}
+    button:hover {{ background: #3A4150; }}
+    button.active {{ background: #FF4B4B; border-color: #FF4B4B; color: #FFF; }}
+    
+    .panel-title {{ font-size: 15px; font-weight: 600; color: #FFF; border-bottom: 1px solid #2B303A; padding-bottom: 8px; margin-bottom: 8px; display: flex; justify-content: space-between; }}
+    .field-group {{ display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; }}
+    .field-group label {{ font-size: 12px; color: #9AA0A6; }}
+    .field-row {{ display: flex; gap: 8px; }}
+    .field-row input {{ width: 100%; }}
+    input[type="text"], input[type="number"] {{ background: #0E1117; border: 1px solid #3A4150; color: #FFF; padding: 6px 8px; border-radius: 4px; font-size: 13px; }}
+    input[type="color"] {{ width: 100%; height: 36px; border: none; background: transparent; cursor: pointer; }}
+    
+    .item-list {{ display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }}
+    .item-card {{ background: #20242D; border: 1px solid #2E3440; border-radius: 6px; padding: 10px; cursor: pointer; transition: all 0.2s; }}
+    .item-card:hover {{ border-color: #4C566A; background: #252A35; }}
+    .item-card.selected {{ border-color: #FF4B4B; background: #2D2328; }}
+    .item-card .name {{ font-weight: 600; font-size: 13px; color: #FFF; display: flex; justify-content: space-between; }}
+    .item-card .dims {{ font-size: 11px; color: #8F96A0; margin-top: 4px; }}
 
-with st.sidebar.expander("🏠 房間基礎尺寸 (cm)", expanded=False):
-    st.session_state.room["width"] = st.number_input("房間寬度 (X)", value=st.session_state.room["width"], step=10)
-    st.session_state.room["depth"] = st.number_input("房間深度 (Y)", value=st.session_state.room["depth"], step=10)
-    st.session_state.room["height"] = st.number_input("樓層高度 (Z)", value=st.session_state.room["height"], step=10)
+    #canvas-container, #three-container {{ width: 100%; height: calc(100vh - 50px); position: absolute; top: 50px; left: 0; }}
+    #three-container {{ display: none; }}
+  </style>
+</head>
+<body>
 
-with st.sidebar.expander("🧭 八方坐向設定 (東西南北交叉線)", expanded=True):
-    show_compass = st.checkbox("顯示坐向八方放射線", value=True)
-    st.session_state.compass_center["x"] = st.number_input("放射中心點 X (cm)", value=st.session_state.compass_center["x"], step=5)
-    st.session_state.compass_center["y"] = st.number_input("放射中心點 Y (cm)", value=st.session_state.compass_center["y"], step=5)
-    compass_rotation = st.slider("羅盤旋轉角度 (度)", min_value=0, max_value=360, value=0, step=1)
-    st.caption("💡 附圖方位為傳統坐向：**東在左、北在下、南在上、西在右**。")
+<div class="app-container">
+  <!-- 左側編輯面板 -->
+  <div class="left-panel">
+    <div class="panel-title">✏️ 物件屬性編輯</div>
+    
+    <div id="no-selection" style="color: #6E7681; font-size: 13px; margin-top: 20px; text-align: center;">
+      👈 請點選畫面上或右側列表中的物件進行即時編輯
+    </div>
 
-with st.sidebar.expander("🔲 留白空間與窗戶尺寸", expanded=False):
-    st.markdown("**右上留白區**")
-    st.session_state.void_area["w"] = st.number_input("留白寬 (cm)", value=st.session_state.void_area["w"], step=5)
-    st.session_state.void_area["d"] = st.number_input("留白深 (cm)", value=st.session_state.void_area["d"], step=5)
-    st.session_state.void_area["x"] = st.number_input("留白 X 座標", value=st.session_state.void_area["x"], step=5)
-    st.session_state.void_area["y"] = st.number_input("留白 Y 座標", value=st.session_state.void_area["y"], step=5)
+    <div id="prop-editor" style="display: none;">
+      <div class="field-group">
+        <label>名稱 (Name)</label>
+        <input type="text" id="prop-name">
+      </div>
 
-with st.sidebar.expander("➕ 新增物件 / 家具", expanded=False):
-    with st.form("add_obj_form"):
-        new_name = st.text_input("物件名稱", value="置物架")
-        new_w = st.number_input("寬度 W (cm)", value=60, min_value=1)
-        new_d = st.number_input("深度 D (cm)", value=40, min_value=1)
-        new_h = st.number_input("高度 H (cm, 留空或為0則預設 30cm)", value=0, min_value=0)
-        new_x = st.number_input("X 座標 (cm)", value=100, min_value=0)
-        new_y = st.number_input("Y 座標 (cm)", value=100, min_value=0)
-        new_color = st.color_picker("物件顏色", "#FF9999")
-        submitted = st.form_submit_button("新增至空間")
-        if submitted:
-            actual_h = new_h if new_h > 0 else 30
-            st.session_state.objects.append({
-                "id": f"obj_{len(st.session_state.objects)+1}",
-                "name": new_name,
-                "w": new_w, "d": new_d, "h": actual_h,
-                "x": new_x, "y": new_y,
-                "color": new_color,
-                "text_color": "#FFFFFF",
-                "label": f"{new_w}x{new_d}\n{new_name}"
-            })
-            st.success(f"已新增 {new_name}（高度：{actual_h} cm）！")
-            st.rerun()
+      <div class="field-group">
+        <label>長寬 (cm) [直接拖曳控制點也能拉伸]</label>
+        <div class="field-row">
+          <input type="number" id="prop-w" title="寬度 W">
+          <input type="number" id="prop-d" title="深度 D">
+        </div>
+      </div>
 
-# --- 2D 平面圖渲染函數 ---
-def render_2d_view():
-    fig = go.Figure()
-    rw = st.session_state.room["width"]
-    rd = st.session_state.room["depth"]
+      <div class="field-group">
+        <label>高度 (cm, 預設 30cm)</label>
+        <input type="number" id="prop-h" placeholder="預設 30">
+      </div>
 
-    # 1. 地面藍色可使用底色
-    fig.add_shape(
-        type="rect",
-        x0=20, y0=40, x1=rw+20, y1=rd+40,
-        fillcolor="#5794CE",
-        line=dict(color="#295B91", width=2),
-        layer="below"
-    )
+      <div class="field-group">
+        <label>旋轉角度 (度 °) [或用上方圓點旋轉]</label>
+        <input type="number" id="prop-rot" min="0" max="360">
+      </div>
 
-    # 2. 留白區域 (白色方塊)
-    v = st.session_state.void_area
-    fig.add_shape(
-        type="rect",
-        x0=v["x"], y0=v["y"], x1=v["x"]+v["w"], y1=v["y"]+v["d"],
-        fillcolor=v["color"],
-        line=dict(color="#D0D0D0", width=1)
-    )
+      <div class="field-group">
+        <label>顏色外觀 (調色盤)</label>
+        <input type="color" id="prop-color">
+      </div>
 
-    # 3. 窗戶 (底部黃色線條)
-    for win in st.session_state.windows:
-        fig.add_shape(
-            type="rect",
-            x0=win["x"], y0=win["y"], x1=win["x"]+win["w"], y1=win["y"]+win["d"],
-            fillcolor=win["color"],
-            line=dict(color="#D48806", width=2)
-        )
+      <div class="field-group">
+        <label>🎨 上傳貼圖 / 材質</label>
+        <input type="file" id="prop-texture-file" accept="image/*" style="font-size: 12px; color: #8F96A0;">
+      </div>
 
-    # 4. 繪製所有家具物件
-    for obj in st.session_state.objects:
-        x0, y0 = obj["x"], obj["y"]
-        x1, y1 = x0 + obj["w"], y0 + obj["d"]
-        fig.add_shape(
-            type="rect",
-            x0=x0, y0=y0, x1=x1, y1=y1,
-            fillcolor=obj["color"],
-            line=dict(color="#333333", width=1.5),
-            layer="above"
-        )
-        # 標籤文字
-        fig.add_annotation(
-            x=(x0 + x1) / 2,
-            y=(y0 + y1) / 2,
-            text=obj["label"].replace("\n", "<br>"),
-            showarrow=False,
-            font=dict(color=obj.get("text_color", "#FFFFFF"), size=13, family="Microsoft JhengHei, Arial"),
-            align="center"
-        )
+      <div style="display: flex; gap: 8px; margin-top: 10px;">
+        <button id="btn-duplicate" style="flex: 1;">複製此物件</button>
+        <button id="btn-delete" style="flex: 1; background: #8B0000; border-color: #8B0000;">刪除</button>
+      </div>
+    </div>
 
-    # 5. 繪製八方坐向線 (東西南北放射線)
-    if show_compass:
-        cx = st.session_state.compass_center["x"]
-        cy = st.session_state.compass_center["y"]
-        # 附圖方位：東在左 (180°), 北在下 (270°), 南在上 (90°), 西在右 (0°)
-        # 8方位線 (每45度一條線，穿過全房間)
-        angles_deg = [0, 45, 90, 135, 180, 225, 270, 315]
-        labels = {
-            180: "東",
-            270: "北",
-            90: "南",
-            0: "西"
-        }
-        line_len = max(rw, rd) * 1.5
+    <hr style="border: 0; border-top: 1px solid #2B303A; margin: 10px 0;">
+    
+    <div class="panel-title">➕ 新增自訂物件</div>
+    <button id="btn-add-new" style="background: #1F6FEB; border-color: #1F6FEB; width: 100%;">新增物件</button>
+  </div>
 
-        for ang in angles_deg:
-            rad = np.deg2rad(ang + compass_rotation)
-            ex = cx + line_len * np.cos(rad)
-            ey = cy + line_len * np.sin(rad)
-            fig.add_trace(go.Scatter(
-                x=[cx, ex],
-                y=[cy, ey],
-                mode="lines",
-                line=dict(color="#FFFFFF", width=3.5),
-                hoverinfo="none",
-                showlegend=False
-            ))
+  <!-- 中間畫布區 -->
+  <div class="center-canvas">
+    <div class="toolbar">
+      <div class="btn-group">
+        <button id="btn-mode-2d" class="active">2D 平面互動配置</button>
+        <button id="btn-mode-3d">3D 立體全景視圖</button>
+      </div>
+      <div style="font-size: 12px; color: #8F96A0;">
+        💡 提示：點擊直接移動，拉邊角控制點縮放，拉頂部圓點旋轉
+      </div>
+    </div>
+    
+    <div id="canvas-container">
+      <canvas id="fabric-canvas"></canvas>
+    </div>
+    <div id="three-container"></div>
+  </div>
 
-        # 方位標註方塊 (如圖中的紫色標籤)
-        # 東 (左方)
-        fig.add_shape(
-            type="rect",
-            x0=-15, y0=cy-25, x1=25, y1=cy+25,
-            fillcolor="#BA68C8", line=dict(color="#BA68C8")
-        )
-        fig.add_annotation(
-            x=5, y=cy, text="東", showarrow=False,
-            font=dict(color="#FFFFFF", size=24, family="KaiTi, SimHei, Microsoft JhengHei")
-        )
+  <!-- 右側物件清單 -->
+  <div class="right-panel">
+    <div class="panel-title">
+      <span>📋 房間物件列表</span>
+      <span id="obj-count" style="font-size: 12px; color: #8F96A0;">0</span>
+    </div>
+    <div class="item-list" id="item-list-container"></div>
+  </div>
+</div>
 
-        # 北 (下方)
-        fig.add_shape(
-            type="rect",
-            x0=cx-25, y0=-15, x1=cx+25, y1=25,
-            fillcolor="#BA68C8", line=dict(color="#BA68C8")
-        )
-        fig.add_annotation(
-            x=cx, y=5, text="北", showarrow=False,
-            font=dict(color="#FFFFFF", size=24, family="KaiTi, SimHei, Microsoft JhengHei")
-        )
+<script>
+  const config = {initial_data_json};
+  let items = config.items;
+  let activeId = null;
+  let scaleRatio = 1.6; // cm 轉 畫布 px 比例
+  let canvas, scene, camera, renderer, controls;
+  let currentMode = "2D";
 
-    # 畫布邊界與樣式設定
-    fig.update_layout(
-        plot_bgcolor="#0A0A0A",
-        paper_bgcolor="#0A0A0A",
-        width=1000,
-        height=750,
-        xaxis=dict(
-            range=[-30, rw + 50],
-            showgrid=False,
-            zeroline=False,
-            showticklabels=True,
-            tickfont=dict(color="#777")
-        ),
-        yaxis=dict(
-            range=[-30, rd + 60],
-            showgrid=False,
-            zeroline=False,
-            showticklabels=True,
-            tickfont=dict(color="#777"),
-            scaleanchor="x",
-            scaleratio=1
-        ),
-        margin=dict(l=20, r=20, t=30, b=20)
-    )
-    return fig
+  // --- 初始化 Fabric 2D 畫布 ---
+  function initFabric() {{
+    const container = document.getElementById("canvas-container");
+    const width = container.clientWidth;
+    const height = container.clientHeight;
 
-# --- 3D 立體建模渲染函數 ---
-def create_3d_box(x, y, z, dx, dy, dz, color, name):
-    """生成 3D 長方體網格"""
-    x_corners = [x, x+dx, x+dx, x, x, x+dx, x+dx, x]
-    y_corners = [y, y, y+dy, y+dy, y, y, y+dy, y+dy]
-    z_corners = [z, z, z, z, z+dz, z+dz, z+dz, z+dz]
-    return go.Mesh3d(
-        x=x_corners, y=y_corners, z=z_corners,
-        i=[7, 0, 0, 0, 4, 4, 6, 6, 4, 0, 3, 2],
-        j=[3, 4, 1, 2, 5, 6, 5, 2, 0, 1, 6, 3],
-        k=[0, 7, 2, 3, 6, 7, 1, 1, 5, 5, 7, 6],
-        color=color,
-        opacity=0.9,
-        flatshading=True,
-        name=name,
-        hoverinfo="name"
-    )
+    canvas = new fabric.Canvas('fabric-canvas', {{
+      width: width,
+      height: height,
+      backgroundColor: '#0A0A0A',
+      selection: true
+    }});
 
-def render_3d_view():
-    fig = go.Figure()
-    rw = st.session_state.room["width"]
-    rd = st.session_state.room["depth"]
+    // 繪製背景底圖、窗戶、留白、坐向線條
+    renderBackgroundElements();
 
-    # 地板網格
-    fig.add_trace(go.Mesh3d(
-        x=[20, rw+20, rw+20, 20],
-        y=[40, 40, rd+40, rd+40],
-        z=[0, 0, 0, 0],
-        i=[0, 0], j=[1, 2], k=[2, 3],
-        color="#5794CE", opacity=0.7, name="地板"
-    ))
+    // 載入所有家具物件
+    items.forEach(item => createFabricItem(item));
 
-    # 留白區域 (厚度為 0 的白色墊面或凸起台度)
-    v = st.session_state.void_area
-    fig.add_trace(go.Mesh3d(
-        x=[v["x"], v["x"]+v["w"], v["x"]+v["w"], v["x"]],
-        y=[v["y"], v["y"], v["y"]+v["d"], v["y"]+v["d"]],
-        z=[0.5, 0.5, 0.5, 0.5],
-        i=[0, 0], j=[1, 2], k=[2, 3],
-        color="#FFFFFF", opacity=1.0, name="留白處"
-    ))
+    // 物件互動監聽
+    canvas.on('selection:created', onObjectSelected);
+    canvas.on('selection:updated', onObjectSelected);
+    canvas.on('selection:cleared', onObjectDeselected);
+    canvas.on('object:modified', onObjectModified);
+    canvas.on('object:moving', onObjectModified);
+    canvas.on('object:scaling', onObjectModified);
+    canvas.on('object:rotating', onObjectModified);
 
-    # 渲染所有家具物件立體幾何
-    for obj in st.session_state.objects:
-        h = obj.get("h", 30)
-        h = h if h > 0 else 30
-        box = create_3d_box(
-            x=obj["x"], y=obj["y"], z=0,
-            dx=obj["w"], dy=obj["d"], dz=h,
-            color=obj["color"],
-            name=f"{obj['name']} ({obj['w']}x{obj['d']}x{h}cm)"
-        )
-        fig.add_trace(box)
+    renderRightPanel();
+  }}
 
-    # 3D 八方坐向線
-    if show_compass:
-        cx = st.session_state.compass_center["x"]
-        cy = st.session_state.compass_center["y"]
-        line_len = max(rw, rd) * 1.2
-        for ang in [0, 45, 90, 135, 180, 225, 270, 315]:
-            rad = np.deg2rad(ang + compass_rotation)
-            ex = cx + line_len * np.cos(rad)
-            ey = cy + line_len * np.sin(rad)
-            fig.add_trace(go.Scatter3d(
-                x=[cx, ex], y=[cy, ey], z=[5, 5],
-                mode="lines",
-                line=dict(color="#FFFFFF", width=4),
-                name="坐向線",
-                hoverinfo="none",
-                showlegend=False
-            ))
+  // 繪製背景元素（地面藍色、右上留白、窗戶、八方坐向）
+  function renderBackgroundElements() {{
+    const rw = config.room.width * scaleRatio;
+    const rd = config.room.depth * scaleRatio;
+    const ox = 50, oy = 50;
 
-    fig.update_layout(
-        scene=dict(
-            xaxis=dict(title="寬度 X (cm)", backgroundcolor="#111", gridcolor="#333"),
-            yaxis=dict(title="深度 Y (cm)", backgroundcolor="#111", gridcolor="#333"),
-            zaxis=dict(title="高度 Z (cm)", backgroundcolor="#111", gridcolor="#333", range=[0, st.session_state.room["height"]]),
-            aspectmode="data"
-        ),
-        paper_bgcolor="#0A0A0A",
-        margin=dict(l=0, r=0, t=10, b=0),
-        height=750
-    )
-    return fig
+    // 地面（可使用空間）
+    const floor = new fabric.Rect({{
+      left: ox, top: oy, width: rw, height: rd,
+      fill: '#5794CE', stroke: '#295B91', strokeWidth: 2,
+      selectable: false, evented: false
+    }});
+    canvas.add(floor);
 
-# --- 主展示區 ---
-st.title("🛏️ 空間平面與 3D 視覺化配置系統")
-st.caption("支援長寬高公分（cm）設定、預設高度 30cm、留白與窗戶劃分、八方坐向線條。")
+    // 右上留白區
+    const voidArea = new fabric.Rect({{
+      left: ox + config.void.x * scaleRatio,
+      top: oy + config.void.y * scaleRatio,
+      width: config.void.w * scaleRatio,
+      height: config.void.d * scaleRatio,
+      fill: '#FFFFFF', stroke: '#DDDDDD', strokeWidth: 1,
+      selectable: false, evented: false
+    }});
+    canvas.add(voidArea);
 
-col1, col2 = st.columns([3.5, 1.5])
+    // 下方窗戶 (主窗、小窗)
+    config.windows.forEach(w => {{
+      const win = new fabric.Rect({{
+        left: ox + w.x * scaleRatio,
+        top: oy + w.y * scaleRatio,
+        width: w.w * scaleRatio,
+        height: w.d * scaleRatio,
+        fill: '#FDB813', stroke: '#C88D00', strokeWidth: 1,
+        selectable: false, evented: false
+      }});
+      canvas.add(win);
+    }});
 
-with col1:
-    if view_mode == "2D 平面配置圖":
-        fig_2d = render_2d_view()
-        st.plotly_chart(fig_2d, use_container_width=True)
-    else:
-        fig_3d = render_3d_view()
-        st.plotly_chart(fig_3d, use_container_width=True)
+    // 八方放射坐向線 (交叉中心)
+    const cx = ox + config.compass.x * scaleRatio;
+    const cy = oy + config.compass.y * scaleRatio;
+    const angles = [0, 45, 90, 135, 180, 225, 270, 315];
+    const lineLen = Math.max(rw, rd) * 1.5;
 
-with col2:
-    st.subheader("📋 物件清單與微調")
-    df_data = []
-    for i, obj in enumerate(st.session_state.objects):
-        df_data.append({
-            "名稱": obj["name"],
-            "寬 (W)": obj["w"],
-            "深 (D)": obj["d"],
-            "高 (H)": obj["h"],
-            "X 軸": obj["x"],
-            "Y 軸": obj["y"]
-        })
-    df = pd.DataFrame(df_data)
-    st.dataframe(df, use_container_width=True, hide_index=True)
+    angles.forEach(ang => {{
+      const rad = ang * Math.PI / 180;
+      const ex = cx + lineLen * Math.cos(rad);
+      const ey = cy + lineLen * Math.sin(rad);
+      const line = new fabric.Line([cx, cy, ex, ey], {{
+        stroke: '#FFFFFF', strokeWidth: 3,
+        selectable: false, evented: false
+      }});
+      canvas.add(line);
+    }});
 
-    st.markdown("---")
-    st.subheader("🗑️ 刪除或重置物件")
-    del_target = st.selectbox("選擇要刪除的物件", options=[obj["name"] for obj in st.session_state.objects])
-    if st.button("刪除所選物件"):
-        st.session_state.objects = [o for o in st.session_state.objects if o["name"] != del_target]
-        st.success(f"已刪除 {del_target}")
-        st.rerun()
+    // 紫色坐向方位標籤 (附圖傳統坐向：東在左、北在下)
+    // 東
+    const tagEast = new fabric.Rect({{ left: ox - 40, top: cy - 25, width: 45, height: 45, fill: '#BA68C8', selectable: false, evented: false }});
+    const textEast = new fabric.Text('東', {{ left: ox - 28, top: cy - 18, fontSize: 26, fill: '#FFF', selectable: false, evented: false }});
+    canvas.add(tagEast, textEast);
 
-    if st.button("🔄 重置為附圖原始預設配置"):
-        st.session_state.objects = [dict(item) for item in DEFAULT_OBJECTS]
-        st.session_state.room = DEFAULT_ROOM.copy()
-        st.session_state.compass_center = {"x": 260, "y": 200}
-        st.session_state.void_area = DEFAULT_VOID.copy()
-        st.session_state.windows = [dict(item) for item in DEFAULT_WINDOWS]
-        st.rerun()
+    // 北
+    const tagNorth = new fabric.Rect({{ left: cx - 22, top: oy - 40, width: 45, height: 45, fill: '#BA68C8', selectable: false, evented: false }});
+    const textNorth = new fabric.Text('北', {{ left: cx - 10, top: oy - 33, fontSize: 26, fill: '#FFF', selectable: false, evented: false }});
+    canvas.add(tagNorth, textNorth);
+  }}
+
+  // 建立可直接移動、旋轉、拉伸的 Fabric 家具群組
+  function createFabricItem(item) {{
+    const ox = 50, oy = 50;
+    const w = item.w * scaleRatio;
+    const d = item.d * scaleRatio;
+
+    const rect = new fabric.Rect({{
+      width: w,
+      height: d,
+      fill: item.color,
+      stroke: '#333333',
+      strokeWidth: 1.5,
+      originX: 'center',
+      originY: 'center'
+    }});
+
+    const labelText = item.name + "\\n" + Math.round(item.w) + "x" + Math.round(item.d);
+    const text = new fabric.Text(labelText, {{
+      fontSize: 13,
+      fill: '#FFFFFF',
+      originX: 'center',
+      originY: 'center',
+      textAlign: 'center'
+    }});
+
+    const group = new fabric.Group([rect, text], {{
+      left: ox + item.x * scaleRatio + w / 2,
+      top: oy + item.y * scaleRatio + d / 2,
+      angle: item.rot || 0,
+      originX: 'center',
+      originY: 'center',
+      itemId: item.id
+    }});
+
+    // 設置控制點樣式（方便縮放與旋轉）
+    group.setControlsVisibility({{
+      mt: true, mb: true, ml: true, mr: true,
+      tl: true, tr: true, bl: true, br: true,
+      mtr: true // 頂部旋轉控制點
+    }});
+
+    canvas.add(group);
+  }}
+
+  // --- 選取與同步邏輯 ---
+  function onObjectSelected(e) {{
+    const target = e.selected ? e.selected[0] : null;
+    if (!target || !target.itemId) return;
+    activeId = target.itemId;
+    updateLeftPanel();
+    highlightRightPanel();
+  }}
+
+  function onObjectDeselected() {{
+    activeId = null;
+    document.getElementById("no-selection").style.display = "block";
+    document.getElementById("prop-editor").style.display = "none";
+    highlightRightPanel();
+  }}
+
+  function onObjectModified(e) {{
+    const target = e.target;
+    if (!target || !target.itemId) return;
+    
+    const item = items.find(i => i.id === target.itemId);
+    if (!item) return;
+
+    // 計算實際寬高（考慮拉伸縮放 scaleX, scaleY）
+    const actualW = (target.width * target.scaleX) / scaleRatio;
+    const actualD = (target.height * target.scaleY) / scaleRatio;
+    
+    item.w = Math.round(actualW);
+    item.d = Math.round(actualD);
+    item.rot = Math.round(target.angle % 360);
+    item.x = Math.round((target.left - (target.width * target.scaleX) / 2 - 50) / scaleRatio);
+    item.y = Math.round((target.top - (target.height * target.scaleY) / 2 - 50) / scaleRatio);
+
+    // 重設 group 尺寸與內部文字
+    target.set({{ scaleX: 1, scaleY: 1 }});
+    target.item(0).set({{ width: item.w * scaleRatio, height: item.d * scaleRatio }});
+    target.item(1).set({{ text: item.name + "\\n" + item.w + "x" + item.d }});
+
+    updateLeftPanel();
+    renderRightPanel();
+  }}
+
+  // 更新左側編輯欄數值
+  function updateLeftPanel() {{
+    const item = items.find(i => i.id === activeId);
+    if (!item) return;
+
+    document.getElementById("no-selection").style.display = "none";
+    document.getElementById("prop-editor").style.display = "block";
+
+    document.getElementById("prop-name").value = item.name;
+    document.getElementById("prop-w").value = Math.round(item.w);
+    document.getElementById("prop-d").value = Math.round(item.d);
+    document.getElementById("prop-h").value = item.h || 30;
+    document.getElementById("prop-rot").value = item.rot || 0;
+    document.getElementById("prop-color").value = item.color;
+  }}
+
+  // 左側輸入變更事件綁定
+  document.getElementById("prop-name").addEventListener("input", e => {{
+    const item = items.find(i => i.id === activeId);
+    if (!item) return;
+    item.name = e.target.value;
+    syncCanvasItem(item);
+  }});
+  document.getElementById("prop-w").addEventListener("input", e => {{
+    const item = items.find(i => i.id === activeId);
+    if (!item) return;
+    item.w = parseFloat(e.target.value) || 10;
+    syncCanvasItem(item);
+  }});
+  document.getElementById("prop-d").addEventListener("input", e => {{
+    const item = items.find(i => i.id === activeId);
+    if (!item) return;
+    item.d = parseFloat(e.target.value) || 10;
+    syncCanvasItem(item);
+  }});
+  document.getElementById("prop-h").addEventListener("input", e => {{
+    const item = items.find(i => i.id === activeId);
+    if (!item) return;
+    item.h = parseFloat(e.target.value) || 30;
+  }});
+  document.getElementById("prop-rot").addEventListener("input", e => {{
+    const item = items.find(i => i.id === activeId);
+    if (!item) return;
+    item.rot = parseFloat(e.target.value) || 0;
+    syncCanvasItem(item);
+  }});
+  document.getElementById("prop-color").addEventListener("input", e => {{
+    const item = items.find(i => i.id === activeId);
+    if (!item) return;
+    item.color = e.target.value;
+    item.texture = ""; // 切換顏色時清除自訂貼圖
+    syncCanvasItem(item);
+  }});
+
+  // 貼圖上傳與材質套用
+  document.getElementById("prop-texture-file").addEventListener("change", function(e) {{
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = function(f) {{
+      const item = items.find(i => i.id === activeId);
+      if (!item) return;
+      item.texture = f.target.result;
+      
+      fabric.Image.fromURL(item.texture, function(img) {{
+        const group = canvas.getObjects().find(o => o.itemId === item.id);
+        if (group) {{
+          img.scaleToWidth(item.w * scaleRatio);
+          img.scaleToHeight(item.d * scaleRatio);
+          const pattern = new fabric.Pattern({{
+            source: img.getElement(),
+            repeat: 'repeat'
+          }});
+          group.item(0).set('fill', pattern);
+          canvas.renderAll();
+        }}
+      }});
+    }};
+    reader.readAsDataURL(file);
+  }});
+
+  // 將資料同步回 Fabric 畫布圖元
+  function syncCanvasItem(item) {{
+    const group = canvas.getObjects().find(o => o.itemId === item.id);
+    if (!group) return;
+
+    const w = item.w * scaleRatio;
+    const d = item.d * scaleRatio;
+    group.item(0).set({{ width: w, height: d, fill: item.color }});
+    group.item(1).set({{ text: item.name + "\\n" + Math.round(item.w) + "x" + Math.round(item.d) }});
+    group.set({{ angle: item.rot }});
+    group.setCoords();
+    canvas.renderAll();
+    renderRightPanel();
+  }}
+
+  // 刪除與複製物件
+  document.getElementById("btn-delete").addEventListener("click", () => {{
+    if (!activeId) return;
+    items = items.filter(i => i.id !== activeId);
+    const group = canvas.getObjects().find(o => o.itemId === activeId);
+    if (group) canvas.remove(group);
+    canvas.discardActiveObject();
+    onObjectDeselected();
+    renderRightPanel();
+  }});
+
+  document.getElementById("btn-duplicate").addEventListener("click", () => {{
+    const item = items.find(i => i.id === activeId);
+    if (!item) return;
+    const newItem = JSON.parse(JSON.stringify(item));
+    newItem.id = "item_" + Date.now();
+    newItem.name = item.name + " (複本)";
+    newItem.x += 20;
+    newItem.y += 20;
+    items.push(newItem);
+    createFabricItem(newItem);
+    selectItemById(newItem.id);
+    renderRightPanel();
+  }});
+
+  document.getElementById("btn-add-new").addEventListener("click", () => {{
+    const newItem = {{
+      id: "item_" + Date.now(),
+      name: "新家具",
+      x: 100, y: 100,
+      w: 60, d: 50, h: 30, // 預設 30cm 高
+      rot: 0,
+      color: "#FF9999",
+      texture: ""
+    }};
+    items.push(newItem);
+    createFabricItem(newItem);
+    selectItemById(newItem.id);
+    renderRightPanel();
+  }});
+
+  // 右側清單渲染與聯動
+  function renderRightPanel() {{
+    const container = document.getElementById("item-list-container");
+    document.getElementById("obj-count").innerText = items.length;
+    container.innerHTML = "";
+
+    items.forEach(item => {{
+      const card = document.createElement("div");
+      card.className = "item-card" + (item.id === activeId ? " selected" : "");
+      card.onclick = () => selectItemById(item.id);
+
+      const hVal = item.h || 30;
+      card.innerHTML = `
+        <div class="name">
+          <span>${{item.name}}</span>
+          <span style="display:inline-block;width:12px;height:12px;border-radius:2px;background:${{item.color}};"></span>
+        </div>
+        <div class="dims">尺寸: ${{Math.round(item.w)}} × ${{Math.round(item.d)}} × ${{hVal}} cm | ${{item.rot || 0}}°</div>
+      `;
+      container.appendChild(card);
+    }});
+  }}
+
+  function highlightRightPanel() {{
+    document.querySelectorAll(".item-card").forEach((card, idx) => {{
+      if (items[idx] && items[idx].id === activeId) {{
+        card.classList.add("selected");
+        card.scrollIntoView({{ behavior: "smooth", block: "nearest" }});
+      }} else {{
+        card.classList.remove("selected");
+      }}
+    }});
+  }}
+
+  // 點擊右邊列表物件時，畫面上同時選取
+  function selectItemById(id) {{
+    activeId = id;
+    const group = canvas.getObjects().find(o => o.itemId === id);
+    if (group) {{
+      canvas.setActiveObject(group);
+      canvas.renderAll();
+    }}
+    updateLeftPanel();
+    highlightRightPanel();
+  }}
+
+  // --- 3D 視圖渲染 (Three.js) ---
+  function initThree() {{
+    const container = document.getElementById("three-container");
+    const width = container.clientWidth;
+    const height = container.clientHeight;
+
+    scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x0E1117);
+
+    camera = new THREE.PerspectiveCamera(45, width / height, 1, 3000);
+    camera.position.set(250, 400, 500);
+
+    renderer = new THREE.WebGLRenderer({{ antialias: true }});
+    renderer.setSize(width, height);
+    container.innerHTML = "";
+    container.appendChild(renderer.domElement);
+
+    controls = new THREE.OrbitControls(camera, renderer.domElement);
+    controls.target.set(config.room.width / 2, 0, config.room.depth / 2);
+
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
+    scene.add(ambientLight);
+
+    const dirLight = new THREE.DirectionalLight(0xffffff, 0.6);
+    dirLight.position.set(200, 400, 200);
+    scene.add(dirLight);
+
+    animateThree();
+  }}
+
+  function updateThreeScene() {{
+    // 清除舊模型
+    while (scene.children.length > 2) {{
+      scene.remove(scene.children[scene.children.length - 1]);
+    }}
+
+    // 地板
+    const floorGeo = new THREE.PlaneGeometry(config.room.width, config.room.depth);
+    const floorMat = new THREE.MeshLambertMaterial({{ color: 0x5794CE }});
+    const floor = new THREE.Mesh(floorGeo, floorMat);
+    floor.rotation.x = -Math.PI / 2;
+    floor.position.set(config.room.width / 2, 0, config.room.depth / 2);
+    scene.add(floor);
+
+    // 留白區
+    const voidGeo = new THREE.PlaneGeometry(config.void.w, config.void.d);
+    const voidMat = new THREE.MeshBasicMaterial({{ color: 0xffffff }});
+    const voidMesh = new THREE.Mesh(voidGeo, voidMat);
+    voidMesh.rotation.x = -Math.PI / 2;
+    voidMesh.position.set(config.void.x + config.void.w / 2, 0.2, config.void.y + config.void.d / 2);
+    scene.add(voidMesh);
+
+    // 家具物件 3D 長方體
+    items.forEach(item => {{
+      const h = item.h || 30;
+      const geo = new THREE.BoxGeometry(item.w, h, item.d);
+      
+      let mat;
+      if (item.texture) {{
+        const texture = new THREE.TextureLoader().load(item.texture);
+        mat = new THREE.MeshLambertMaterial({{ map: texture }});
+      }} else {{
+        mat = new THREE.MeshLambertMaterial({{ color: item.color }});
+      }}
+
+      const mesh = new THREE.Mesh(geo, mat);
+      const rad = -(item.rot || 0) * Math.PI / 180;
+      mesh.rotation.y = rad;
+      mesh.position.set(item.x + item.w / 2, h / 2, item.y + item.d / 2);
+      scene.add(mesh);
+    }});
+  }}
+
+  function animateThree() {{
+    requestAnimationFrame(animateThree);
+    if (controls) controls.update();
+    if (renderer && scene && camera) renderer.render(scene, camera);
+  }}
+
+  // 模式切換按鈕
+  document.getElementById("btn-mode-2d").addEventListener("click", () => {{
+    currentMode = "2D";
+    document.getElementById("btn-mode-2d").classList.add("active");
+    document.getElementById("btn-mode-3d").classList.remove("active");
+    document.getElementById("canvas-container").style.display = "block";
+    document.getElementById("three-container").style.display = "none";
+  }});
+
+  document.getElementById("btn-mode-3d").addEventListener("click", () => {{
+    currentMode = "3D";
+    document.getElementById("btn-mode-3d").classList.add("active");
+    document.getElementById("btn-mode-2d").classList.remove("active");
+    document.getElementById("canvas-container").style.display = "none";
+    document.getElementById("three-container").style.display = "block";
+    if (!renderer) initThree();
+    updateThreeScene();
+  }});
+
+  // 啟動應用
+  window.addEventListener("load", initFabric);
+</script>
+</body>
+</html>
+"""
+
+# 渲染整合應用
+components.html(html_code, height=920, scrolling=False)
