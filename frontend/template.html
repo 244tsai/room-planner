@@ -9,12 +9,18 @@
     <div class="tab-bar">
       <div class="tab-btn active" id="tab-btn-item" onclick="switchLeftTab('item')">✏️ 物件</div>
       <div class="tab-btn" id="tab-btn-room" onclick="switchLeftTab('room')">🧭 地基方位</div>
-      <div class="tab-btn" id="tab-btn-human" onclick="switchLeftTab('human')">🚶 人物</div>
+      <div class="tab-btn" id="tab-btn-human" onclick="switchLeftTab('human')">🚶 第一人稱</div>
       <div class="tab-btn" id="tab-btn-save" onclick="switchLeftTab('save')">💾 存檔</div>
     </div>
 
     <!-- 標籤 1：物件新增(填好按新增) + 物件編輯 -->
     <div class="tab-content" id="tab-content-item">
+      <!-- 鎖定既有物品縮放開關 (2D與3D同步) -->
+      <div style="background:#1E293B; border:1px solid #3B82F6; padding:7px 8px; border-radius:6px; display:flex; align-items:center; justify-content:space-between; gap:6px;">
+        <span style="font-size:11px; font-weight:600; color:#93C5FD;">🔒 鎖定既有物品縮放 (僅移動/旋轉)</span>
+        <input type="checkbox" id="lock-scale-chk" style="width:16px; height:16px; cursor:pointer; flex-shrink:0;">
+      </div>
+
       <div class="quick-add-box">
         <div class="panel-title" style="margin-bottom:2px;">➕ 新增物件設定</div>
         <div class="field-group">
@@ -22,13 +28,14 @@
           <select id="new-obj-category"></select>
         </div>
         <div class="field-group">
-          <label>2. 選擇模型種類 (床/門窗/插座/開關)</label>
+          <label>2. 選擇模型種類</label>
           <select id="new-obj-type" onchange="onNewObjTypeChange()">
-            <option value="furniture">🛋️ 一般家具 / 床</option>
-            <option value="door">🚪 房門 (Door)</option>
-            <option value="window">🪟 窗戶 (Window)</option>
-            <option value="socket">🔌 插座 (Socket)</option>
-            <option value="switch">💡 開關 (Switch)</option>
+            <option value="furniture">🛋️ 一般家具 / 床 (貼地)</option>
+            <option value="wall_item">🖼️ 牆壁上物品 (貼牆可調Z軸)</option>
+            <option value="door">🚪 房門 (貼牆貼地)</option>
+            <option value="window">🪟 窗戶 (貼牆外突可調Z軸)</option>
+            <option value="socket">🔌 插座 (貼牆外突可調Z軸)</option>
+            <option value="switch">💡 開關 (貼牆外突可調Z軸)</option>
           </select>
         </div>
         <div class="field-group">
@@ -38,7 +45,7 @@
             <div><span>寬 W</span><input type="number" id="new-obj-w" value="60"></div>
             <div><span>深 D</span><input type="number" id="new-obj-d" value="50"></div>
             <div><span>高 H</span><input type="number" id="new-obj-h" value="30"></div>
-            <div><span style="color:#F59E0B;">離地Z</span><input type="number" id="new-obj-z" value="0"></div>
+            <div id="new-obj-z-row" style="display:none;"><span style="color:#F59E0B;">離地Z</span><input type="number" id="new-obj-z" value="0"></div>
           </div>
         </div>
         <button onclick="confirmAddNewObject()" class="primary" style="width:100%; padding:7px; font-weight:bold; margin-top:2px;">
@@ -47,7 +54,7 @@
       </div>
 
       <div id="no-selection" style="color: #94A3B8; font-size: 11px; margin: 4px 0; text-align: center; line-height: 1.4; background: #1F232B; padding: 8px; border-radius: 6px; border: 1px dashed #334155;">
-        👈 <b>點選畫面或列表中的物件進行編輯</b><br>💡 支援「按住列表物件拖曳至其他分類」自動改分類！
+        👈 <b>點選畫面或列表中的物件進行編輯</b><br>💡 物件不可重疊穿模；拉超過牆壁會自動移至房外備用區！
       </div>
 
       <div id="prop-editor" style="display: none;">
@@ -67,11 +74,12 @@
         <div class="field-group">
           <label>物件模型種類</label>
           <select id="prop-type">
-            <option value="furniture">🛋️ 一般家具 / 床</option>
-            <option value="door">🚪 房門 (Door)</option>
-            <option value="window">🪟 窗戶 (Window)</option>
-            <option value="socket">🔌 插座 (Socket)</option>
-            <option value="switch">💡 開關 (Switch)</option>
+            <option value="furniture">🛋️ 一般家具 / 床 (貼地)</option>
+            <option value="wall_item">🖼️ 牆壁上物品 (貼牆可調Z軸)</option>
+            <option value="door">🚪 房門 (貼牆貼地)</option>
+            <option value="window">🪟 窗戶 (貼牆外突可調Z軸)</option>
+            <option value="socket">🔌 插座 (貼牆外突可調Z軸)</option>
+            <option value="switch">💡 開關 (貼牆外突可調Z軸)</option>
           </select>
         </div>
 
@@ -85,11 +93,11 @@
         </div>
 
         <div class="field-group">
-          <label>坐標：X / Y / <span style="color:#F59E0B;font-weight:bold;">Z 離地高</span> (cm)</label>
+          <label>坐標：X / Y <span id="prop-z-hint" style="color:#F59E0B;font-weight:bold;">/ Z 離地高</span> (cm)</label>
           <div class="field-row">
             <div><span style="font-size:11px;color:#94A3B8;">X 坐標</span><input type="number" id="prop-x"></div>
             <div><span style="font-size:11px;color:#94A3B8;">Y 坐標</span><input type="number" id="prop-y"></div>
-            <div><span style="font-size:11px;color:#F59E0B;">Z 離地</span><input type="number" id="prop-z"></div>
+            <div id="prop-z-row"><span style="font-size:11px;color:#F59E0B;">Z 離地</span><input type="number" id="prop-z"></div>
           </div>
         </div>
 
@@ -145,7 +153,7 @@
         <input type="checkbox" id="room-editable-lock" style="width:16px; height:16px; cursor:pointer; flex-shrink:0;">
       </div>
 
-      <div class="panel-title">🏠 房間地面尺寸 (cm)</div>
+      <div class="panel-title">🏠 房間地面尺寸 (cm, 改變時羅盤中心自動連動)</div>
       <div class="field-row">
         <div><span style="font-size:11px;color:#94A3B8;">總寬 X</span><input type="number" id="room-w" class="live-room-input"></div>
         <div><span style="font-size:11px;color:#94A3B8;">總深 Y</span><input type="number" id="room-d" class="live-room-input"></div>
@@ -188,10 +196,14 @@
       </div>
       <div id="void-list-container"></div>
 
-      <div class="panel-title" style="margin-top: 6px;">🧭 八方坐向羅盤</div>
+      <div class="panel-title" style="margin-top: 6px;">🧭 八方坐向羅盤 (預設自動置中 W/2, D/2)</div>
       <div style="display:flex; justify-content:space-between; align-items:center;">
         <span style="font-size:11px;">顯示八方坐向羅盤</span>
         <input type="checkbox" id="compass-show" class="live-room-input" checked style="width:16px; height:16px;">
+      </div>
+      <div style="display:flex; justify-content:space-between; align-items:center;">
+        <span style="font-size:11px; color:#93C5FD;">隨地基尺寸自動置中 (長寬除以2)</span>
+        <input type="checkbox" id="compass-auto-center" class="live-room-input" checked style="width:16px; height:16px;">
       </div>
       <div class="field-row">
         <div><span style="font-size:11px;color:#94A3B8;">中心 X</span><input type="number" id="compass-x" class="live-room-input"></div>
@@ -217,12 +229,18 @@
       </div>
     </div>
 
-    <!-- 標籤 3：人物模型與人類第一人稱視角設定 -->
+    <!-- 標籤 3：人物模型與第一人稱視角設定 -->
     <div class="tab-content" id="tab-content-human" style="display: none;">
-      <div class="panel-title" style="color:#C084FC;">🚶 人物身高與自然視角</div>
+      <div class="panel-title" style="color:#C084FC;">🚶 人物身高與第一人稱視角</div>
       <div style="font-size:11px; color:#94A3B8; line-height:1.4; background:#1F232B; padding:8px; border-radius:6px;">
         💡 <b>防誤觸保護</b>：身高僅限此處編輯。<br>
-        💡 <b>點擊地面移動</b>：在 3D 或人類視角中<b>直接點擊地板或床面</b>，人物會自動走過去！
+        💡 <b>點擊地面移動</b>：在 3D 或第一人稱視角中<b>點擊地板或床面</b>，人物會以自然擺手擺腿步伐走過去！
+      </div>
+
+      <!-- 僅水平轉動開關 -->
+      <div style="background:#1E293B; border:1px solid #A855F7; padding:7px 8px; border-radius:6px; display:flex; align-items:center; justify-content:space-between; gap:6px;">
+        <span style="font-size:11px; font-weight:600; color:#E9D5FF;">🔒 僅水平轉動 (鎖定抬頭低頭防晃)</span>
+        <input type="checkbox" id="human-lock-horiz" style="width:16px; height:16px; cursor:pointer; flex-shrink:0;">
       </div>
 
       <div class="field-group">
@@ -253,14 +271,14 @@
         <input type="number" id="human-rot" min="0" max="360">
       </div>
 
-      <div class="field-group">
+      <div class="field-group" id="human-pitch-group">
         <label><span>📐 抬頭/低頭仰角 (-85°～+85°)</span><span id="human-pitch-val" style="color:#38BDF8;">0°</span></label>
         <input type="range" id="human-pitch-slider" min="-85" max="85" value="0" style="width:100%;">
         <input type="number" id="human-pitch" min="-85" max="85">
       </div>
 
       <button onclick="enterHumanFPV()" class="purple" style="width:100%; padding:9px; font-size:12px; margin-top:4px;">
-        👁️ 進入 3D 人類自然視角
+        👁️ 進入第一人稱視角
       </button>
       <div class="field-row" style="margin-top:4px;">
         <button onclick="placeHumanOnBed('sit')" style="width:100%; padding:7px;">🪑 坐到床沿看房間</button>
@@ -298,39 +316,42 @@
         </div>
         <button id="btn-mode-2d" class="active">📐 2D 平面</button>
         <button id="btn-mode-3d">🧊 3D 鳥瞰</button>
-        <button id="btn-mode-fpv" class="purple">👁️ 人類視角</button>
+        <button id="btn-mode-fpv" class="purple">👁️ 第一人稱視角</button>
       </div>
       <div class="hint-text" style="font-size: 11px; color: #94A3B8;">
-        💡 支援「<b>點擊地板或床面直接走過去</b>」 | 左右面板邊緣可拖曳調整寬度
+        💡 物品不可穿模重疊 | 超過牆壁自動移至房外備用區 | 窗戶/開關/插座往牆外突出
       </div>
     </div>
 
-    <div class="toast-msg" id="toast-msg">⚠️ 前方有家具或牆壁阻擋，無法穿越！</div>
+    <div class="toast-msg" id="toast-msg">⚠️ 提示訊息</div>
 
     <div class="view-controls" id="view-controls-2d">
       <button id="btn-zoom-in">➕</button>
       <button id="btn-zoom-out">➖</button>
       <button id="btn-zoom-fit">🔍 居中</button>
       <button id="btn-pan-toggle">✋ 平移: 關</button>
+      <button id="btn-lock-scale-2d" onclick="toggleLockScaleBtn()">🔓 縮放: 開</button>
       <button onclick="deleteSelectedActive()" class="danger">🗑️ 刪除</button>
     </div>
 
     <div class="view-controls" id="view-controls-3d" style="display:none;">
       <button id="btn-3d-translate" class="active" onclick="set3DGizmoMode('translate')">✥ 移動</button>
       <button id="btn-3d-rotate" onclick="set3DGizmoMode('rotate')">🔄 旋轉</button>
-      <button id="btn-3d-scale" onclick="set3DGizmoMode('scale')">↔️ 縮放家具</button>
+      <button id="btn-3d-scale" onclick="set3DGizmoMode('scale')">↔️ 縮放物品</button>
+      <button id="btn-lock-scale-3d" onclick="toggleLockScaleBtn()">🔓 縮放: 開</button>
       <button onclick="deleteSelectedActive()" class="danger">🗑️ 刪除</button>
     </div>
 
     <div class="fpv-hud" id="fpv-hud">
       <div style="display:flex; justify-content:space-between; width:100%; align-items:center; gap:6px;">
-        <span id="fpv-status-text" style="font-size:11px; font-weight:bold; color:#DDD6FE;">👆 點地面走過去 | 拖曳畫面轉頭</span>
+        <span id="fpv-status-text" style="font-size:11px; font-weight:bold; color:#DDD6FE;">👁️ 第一人稱視角 (點地面走動)</span>
         <button onclick="exitHumanFPV()" class="danger" style="padding:3px 8px; font-size:11px;">退出視角</button>
       </div>
-      <div style="display:flex; gap:5px; width:100%;">
+      <div style="display:flex; gap:5px; width:100%; align-items:center;">
         <button id="hud-btn-stand" style="flex:1;" onclick="setHumanPosture('stand')">🧍 站立</button>
         <button id="hud-btn-sit" style="flex:1;" onclick="setHumanPosture('sit')">🪑 坐姿</button>
-        <button id="hud-btn-lie" style="flex:1;" onclick="setHumanPosture('lie')">🛏️ 躺姿仰視</button>
+        <button id="hud-btn-lie" style="flex:1;" onclick="setHumanPosture('lie')">🛏️ 躺姿</button>
+        <button id="hud-btn-lock-h" style="flex:1.2;" onclick="toggleLockHorizFPV()">🔓 自由視角</button>
       </div>
       <div style="display:flex; gap:10px; align-items:center; width:100%; justify-content:center;">
         <div class="dpad-grid">
