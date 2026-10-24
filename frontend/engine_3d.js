@@ -1,3 +1,4 @@
+// 建構具手腳關節軸心 (Pivot Joints) 的 3D 擬真人物，支援走動時自然擺手擺腿動畫
 function buildRealistic3DHuman(hData) {
   const group = new THREE.Group();
   const stature = hData.height || 178;
@@ -30,30 +31,48 @@ function buildRealistic3DHuman(hData) {
   const torsoMesh = new THREE.Mesh(new THREE.BoxGeometry(32 * s, 50 * s, 17 * s), shirtMat);
   const pelvisMesh = new THREE.Mesh(new THREE.BoxGeometry(30 * s, 14 * s, 16 * s), pantsMat);
 
-  const armGeo = new THREE.CylinderGeometry(4.2 * s, 3.5 * s, 52 * s, 12);
-  const armL = new THREE.Mesh(armGeo, shirtMat);
-  const armR = new THREE.Mesh(armGeo, shirtMat);
-
   if (posture === "stand") {
     headGroup.position.set(0, 158 * s, 0);
     neckMesh.position.set(0, 145 * s, 0);
     torsoMesh.position.set(0, 118 * s, 0);
     pelvisMesh.position.set(0, 86 * s, 0);
-    armL.position.set(-20 * s, 114 * s, 0);
-    armR.position.set(20 * s, 114 * s, 0);
 
+    // 肩膀關節 Pivot (供走路擺手動畫旋轉)
+    const armGeo = new THREE.CylinderGeometry(4.2 * s, 3.5 * s, 52 * s, 12);
+    const armLPivot = new THREE.Group();
+    armLPivot.position.set(-20 * s, 140 * s, 0);
+    const armLMesh = new THREE.Mesh(armGeo, shirtMat);
+    armLMesh.position.y = -26 * s;
+    armLPivot.add(armLMesh);
+
+    const armRPivot = new THREE.Group();
+    armRPivot.position.set(20 * s, 140 * s, 0);
+    const armRMesh = new THREE.Mesh(armGeo, shirtMat);
+    armRMesh.position.y = -26 * s;
+    armRPivot.add(armRMesh);
+
+    // 髖關節 Pivot (供走路邁步擺腿動畫旋轉)
     const legGeo = new THREE.CylinderGeometry(6 * s, 4.5 * s, 74 * s, 12);
-    const legL = new THREE.Mesh(legGeo, pantsMat);
-    legL.position.set(-8.5 * s, 43 * s, 0);
-    const legR = new THREE.Mesh(legGeo, pantsMat);
-    legR.position.set(8.5 * s, 43 * s, 0);
-
     const shoeGeo = new THREE.BoxGeometry(10 * s, 7 * s, 22 * s);
+
+    const legLPivot = new THREE.Group();
+    legLPivot.position.set(-8.5 * s, 80 * s, 0);
+    const legLMesh = new THREE.Mesh(legGeo, pantsMat);
+    legLMesh.position.y = -37 * s;
     const shoeL = new THREE.Mesh(shoeGeo, shoeMat);
-    shoeL.position.set(-8.5 * s, 3.5 * s, -4 * s);
+    shoeL.position.set(0, -76.5 * s, -4 * s);
+    legLPivot.add(legLMesh, shoeL);
+
+    const legRPivot = new THREE.Group();
+    legRPivot.position.set(8.5 * s, 80 * s, 0);
+    const legRMesh = new THREE.Mesh(legGeo, pantsMat);
+    legRMesh.position.y = -37 * s;
     const shoeR = new THREE.Mesh(shoeGeo, shoeMat);
-    shoeR.position.set(8.5 * s, 3.5 * s, -4 * s);
-    rig.add(headGroup, neckMesh, torsoMesh, pelvisMesh, armL, armR, legL, legR, shoeL, shoeR);
+    shoeR.position.set(0, -76.5 * s, -4 * s);
+    legRPivot.add(legRMesh, shoeR);
+
+    rig.add(headGroup, neckMesh, torsoMesh, pelvisMesh, armLPivot, armRPivot, legLPivot, legRPivot);
+    group.userData.limbs = { armL: armLPivot, armR: armRPivot, legL: legLPivot, legR: legRPivot };
 
   } else if (posture === "sit") {
     const seatOffset = (hData.z || 0) > 0 ? 0 : 42 * s;
@@ -61,8 +80,12 @@ function buildRealistic3DHuman(hData) {
     torsoMesh.position.set(0, (38 + seatOffset) * s, 0);
     neckMesh.position.set(0, (66 + seatOffset) * s, 0);
     headGroup.position.set(0, (78 + seatOffset) * s, 0);
+
+    const armGeo = new THREE.CylinderGeometry(4.2 * s, 3.5 * s, 52 * s, 12);
+    const armL = new THREE.Mesh(armGeo, shirtMat);
     armL.position.set(-20 * s, (38 + seatOffset) * s, -6 * s);
     armL.rotation.x = 0.4;
+    const armR = new THREE.Mesh(armGeo, shirtMat);
     armR.position.set(20 * s, (38 + seatOffset) * s, -6 * s);
     armR.rotation.x = 0.4;
 
@@ -89,8 +112,12 @@ function buildRealistic3DHuman(hData) {
     torsoMesh.rotation.x = Math.PI / 2;
     pelvisMesh.position.set(0, 9 * s, -22 * s);
     pelvisMesh.rotation.x = Math.PI / 2;
+
+    const armGeo = new THREE.CylinderGeometry(4.2 * s, 3.5 * s, 52 * s, 12);
+    const armL = new THREE.Mesh(armGeo, shirtMat);
     armL.position.set(-21 * s, 9 * s, 8 * s);
     armL.rotation.x = Math.PI / 2;
+    const armR = new THREE.Mesh(armGeo, shirtMat);
     armR.position.set(21 * s, 9 * s, 8 * s);
     armR.rotation.x = Math.PI / 2;
 
@@ -115,24 +142,64 @@ function buildRealistic3DHuman(hData) {
   group.add(rig);
   group.position.set(hData.x, hData.z || 0, hData.y);
   group.rotation.y = -(hData.rot || 0) * Math.PI / 180;
-  group.userData = { isHuman: true };
+  group.userData.isHuman = true;
   return group;
 }
 
+// 更新 3D 人物手腳走路擺動動畫
+function updateHumanWalkAnimation(isMoving) {
+  if (!human3DGroup || !human3DGroup.userData.limbs) return;
+  const limbs = human3DGroup.userData.limbs;
+  if (isMoving) {
+    const swing = Math.sin(Date.now() * 0.01) * 0.55;
+    limbs.armL.rotation.x = swing;
+    limbs.armR.rotation.x = -swing;
+    limbs.legL.rotation.x = -swing * 0.85;
+    limbs.legR.rotation.x = swing * 0.85;
+  } else {
+    limbs.armL.rotation.x *= 0.75;
+    limbs.armR.rotation.x *= 0.75;
+    limbs.legL.rotation.x *= 0.75;
+    limbs.legR.rotation.x *= 0.75;
+  }
+}
+
+// 根據選取物件類別與是否鎖定縮放，設定 3D 控制器軸向規則
 function attachGizmoWithRules(mesh) {
   if (!transformControl || !mesh) return;
   transformControl.attach(mesh);
+
   if (mesh.userData.isHuman) {
-    if (gizmoMode === "scale") {
-      transformControl.setMode("translate");
-    } else {
-      transformControl.setMode(gizmoMode);
-    }
+    if (gizmoMode === "scale") transformControl.setMode("translate");
+    else transformControl.setMode(gizmoMode);
     transformControl.showY = (transformControl.getMode() === "rotate");
     transformControl.showX = (transformControl.getMode() !== "rotate");
     transformControl.showZ = (transformControl.getMode() !== "rotate");
+    return;
+  }
+
+  const item = appState.items.find(i => i.id === mesh.userData.itemId);
+  const t = item ? (item.item_type || "furniture") : "furniture";
+
+  if (gizmoMode === "scale" && appState.room.lock_scale) {
+    showToast("🔒 已鎖定既有物品縮放！");
+    transformControl.setMode("translate");
   } else {
     transformControl.setMode(gizmoMode);
+  }
+
+  const curM = transformControl.getMode();
+  if (curM === "translate") {
+    transformControl.showX = true;
+    transformControl.showZ = true;
+    // 只有窗戶/開關/插座/牆壁上物品可調整垂直高度 (Three.js 的 Y 軸)，其他家具強制貼地不顯示垂直移動軸
+    transformControl.showY = isZAdjustableWallType(t);
+  } else if (curM === "rotate") {
+    transformControl.showX = false;
+    transformControl.showZ = false;
+    transformControl.showY = true;
+  } else {
+    // 3D 縮放拉伸模式
     transformControl.showX = true;
     transformControl.showY = true;
     transformControl.showZ = true;
@@ -165,9 +232,22 @@ function initThree() {
     } else {
       if (isOverTrash && activeId && activeId !== "HUMAN") {
         deleteItemById(activeId);
+        trashEl.classList.remove("show", "hover");
+        isOverTrash = false;
+        return;
       }
       trashEl.classList.remove("show", "hover");
       isOverTrash = false;
+
+      // 3D 拖曳或縮放放開後：執行物理防穿模、貼牆與牆外備用區約束，並重繪同步
+      if (!event.value && activeId && activeId !== "HUMAN") {
+        const item = appState.items.find(i => i.id === activeId);
+        if (item) {
+          enforceItemConstraints(item, true);
+          updateLeftItemPanel();
+          renderFullScene();
+        }
+      }
     }
   });
 
@@ -190,14 +270,19 @@ function initThree() {
     } else if (obj.userData.itemId) {
       const item = appState.items.find(i => i.id === obj.userData.itemId);
       if (!item) return;
-      if (gizmoMode === "scale") {
-        item.w = Math.max(5, Math.round(obj.userData.origW * obj.scale.x));
-        item.h = Math.max(5, Math.round(obj.userData.origH * obj.scale.y));
-        item.d = Math.max(5, Math.round(obj.userData.origD * obj.scale.z));
+      if (transformControl.getMode() === "scale" && !appState.room.lock_scale) {
+        item.w = Math.max(5, Math.round(obj.userData.origW * Math.abs(obj.scale.x)));
+        item.h = Math.max(5, Math.min(appState.room.height, Math.round(obj.userData.origH * Math.abs(obj.scale.y))));
+        item.d = Math.max(5, Math.round(obj.userData.origD * Math.abs(obj.scale.z)));
       }
       item.x = Math.round(obj.position.x - item.w / 2);
       item.y = Math.round(obj.position.z - item.d / 2);
-      item.z = Math.max(0, Math.round(obj.position.y - (item.h || 30) / 2));
+      if (isZAdjustableWallType(item.item_type)) {
+        item.z = Math.max(0, Math.min(appState.room.height - (item.h || 30), Math.round(obj.position.y - (item.h || 30) / 2)));
+      } else {
+        item.z = 0;
+        obj.position.y = (item.h || 30) / 2;
+      }
       item.rot = Math.round((-obj.rotation.y * 180 / Math.PI % 360 + 360) % 360);
       updateLeftItemPanel();
       renderRightPanel();
@@ -230,8 +315,11 @@ function initThree() {
       const dy = e.clientY - fpvLastY;
       fpvLastX = e.clientX;
       fpvLastY = e.clientY;
-      appState.human.rot = ((appState.human.rot + dx * 0.35) % 360 + 360) % 360;
-      appState.human.pitch = Math.max(-85, Math.min(85, (appState.human.pitch || 0) - dy * 0.35));
+      appState.human.rot = ((appState.human.rot + dx * 0.32) % 360 + 360) % 360;
+      // 若未勾選「僅水平轉動」，才允許改變上下仰俯角
+      if (!appState.human.lock_horizontal) {
+        appState.human.pitch = Math.max(-85, Math.min(85, (appState.human.pitch || 0) - dy * 0.32));
+      }
       initHumanFormValues();
       syncFPVCamera();
     }
@@ -324,6 +412,10 @@ function triggerWalkToTarget(tx, ty) {
 }
 
 window.set3DGizmoMode = function(mode) {
+  if (mode === "scale" && appState.room.lock_scale) {
+    showToast("🔒 已鎖定既有物品縮放，請先解除鎖定！");
+    return;
+  }
   gizmoMode = mode;
   document.getElementById("btn-3d-translate").classList.toggle("active", mode === "translate");
   document.getElementById("btn-3d-rotate").classList.toggle("active", mode === "rotate");
@@ -424,23 +516,29 @@ function updateThreeScene() {
     const t = item.item_type || "furniture";
     let itemMesh;
 
+    // 判斷是否吸附在東西向側牆 (用於調整窗戶/插座/開關 3D 朝向)
+    const isEastWestWall = (item.wall === "west" || item.wall === "east") || (item.d > item.w && isZAdjustableWallType(t));
+    const faceW = isEastWestWall ? item.d : item.w;
+    const thickD = isEastWestWall ? item.w : item.d;
+
     if (t === "window") {
       itemMesh = new THREE.Group();
-      const fDepth = Math.max(item.d, 8);
-      const frameGeo = new THREE.BoxGeometry(item.w, h, fDepth);
+      const fDepth = Math.max(thickD, 8);
+      const frameGeo = new THREE.BoxGeometry(faceW, h, fDepth);
       itemMesh.add(new THREE.LineSegments(new THREE.EdgesGeometry(frameGeo), new THREE.LineBasicMaterial({ color: 0xF59E0B, linewidth: 3 })));
       const sceneryTex = texLoader.load(item.scenery || appState.default_fuji);
-      const glassMesh = new THREE.Mesh(new THREE.BoxGeometry(Math.max(4, item.w - 4), Math.max(4, h - 4), fDepth * 0.5), new THREE.MeshBasicMaterial({ map: sceneryTex }));
+      const glassMesh = new THREE.Mesh(new THREE.BoxGeometry(Math.max(4, faceW - 4), Math.max(4, h - 4), fDepth * 0.6), new THREE.MeshBasicMaterial({ map: sceneryTex }));
       itemMesh.add(glassMesh);
+      if (isEastWestWall) itemMesh.rotation.y = Math.PI / 2;
 
     } else if (t === "socket") {
       itemMesh = new THREE.Group();
-      const w = Math.max(item.w, 12), d = Math.max(item.d, 4);
+      const w = Math.max(faceW, 12), d = Math.max(thickD, 6);
       const plateMesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), new THREE.MeshLambertMaterial({ color: 0xF8FAFC }));
       plateMesh.add(new THREE.LineSegments(new THREE.EdgesGeometry(plateMesh.geometry), new THREE.LineBasicMaterial({ color: 0x94A3B8 })));
       itemMesh.add(plateMesh);
       [-w * 0.22, w * 0.22].forEach(ox => {
-        [-d/2 - 0.3, d/2 + 0.3].forEach(sz => {
+        [-d/2 - 0.4, d/2 + 0.4].forEach(sz => {
           const slotMat = new THREE.MeshBasicMaterial({ color: 0x1E293B });
           const s1 = new THREE.Mesh(new THREE.BoxGeometry(w * 0.06, h * 0.22, 0.8), slotMat);
           s1.position.set(ox - w * 0.07, h * 0.1, sz);
@@ -451,10 +549,11 @@ function updateThreeScene() {
           itemMesh.add(s1, s2, gnd);
         });
       });
+      if (isEastWestWall) itemMesh.rotation.y = Math.PI / 2;
 
     } else if (t === "switch") {
       itemMesh = new THREE.Group();
-      const w = Math.max(item.w, 12), d = Math.max(item.d, 4);
+      const w = Math.max(faceW, 12), d = Math.max(thickD, 6);
       const plateMesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), new THREE.MeshLambertMaterial({ color: 0xF1F5F9 }));
       itemMesh.add(plateMesh);
       [-w * 0.2, w * 0.2].forEach(ox => {
@@ -465,10 +564,11 @@ function updateThreeScene() {
         ledMesh.position.set(ox, 0, 0);
         itemMesh.add(btnMesh, ledMesh);
       });
+      if (isEastWestWall) itemMesh.rotation.y = Math.PI / 2;
 
     } else if (t === "door") {
       itemMesh = new THREE.Group();
-      const w = item.w, d = Math.max(item.d, 8);
+      const w = faceW, d = Math.max(thickD, 8);
       itemMesh.add(new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(w + 6, h + 3, d + 2)), new THREE.LineBasicMaterial({ color: 0x451A03 })));
       const panelMat = item.texture ? new THREE.MeshLambertMaterial({ map: texLoader.load(item.texture) }) : new THREE.MeshLambertMaterial({ color: item.color || 0x8B5A2B });
       const panelMesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d * 0.75), panelMat);
@@ -483,16 +583,28 @@ function updateThreeScene() {
       const leverB = new THREE.Mesh(new THREE.BoxGeometry(12, 2.5, 2.5), handleMat);
       leverB.position.set(handleSide * (w * 0.36 - 4), -h * 0.04, -d / 2 - 3.5);
       itemMesh.add(handleAxis, leverF, leverB);
+      if (isEastWestWall) itemMesh.rotation.y = Math.PI / 2;
 
     } else {
+      // 一般家具 或 牆壁上物品 (wall_item)
       const geo = new THREE.BoxGeometry(item.w, h, item.d);
       const mat = item.texture ? new THREE.MeshLambertMaterial({ map: texLoader.load(item.texture) }) : new THREE.MeshLambertMaterial({ color: item.color });
       itemMesh = new THREE.Mesh(geo, mat);
-      itemMesh.add(new THREE.LineSegments(new THREE.EdgesGeometry(geo), new THREE.LineBasicMaterial({ color: 0x1E293B })));
+      itemMesh.add(new THREE.LineSegments(new THREE.EdgesGeometry(geo), new THREE.LineBasicMaterial({ color: t === "wall_item" ? 0x10B981 : 0x1E293B })));
+      itemMesh.rotation.y = -(item.rot || 0) * Math.PI / 180;
     }
 
-    itemMesh.rotation.y = -(item.rot || 0) * Math.PI / 180;
-    itemMesh.position.set(item.x + item.w / 2, zBottom + h / 2, item.y + item.d / 2);
+    // 窗戶/開關/插座在 3D 繪製時若往牆外突出，讓內側邊緣貼齊牆面，確保室內外都能看清楚
+    let posX = item.x + item.w / 2;
+    let posZ = item.y + item.d / 2;
+    if (isOuterWallProtrudingType(t)) {
+      if (item.wall === "north") posZ = 0;
+      else if (item.wall === "south") posZ = rd;
+      else if (item.wall === "west") posX = 0;
+      else if (item.wall === "east") posX = rw;
+    }
+
+    itemMesh.position.set(posX, zBottom + h / 2, posZ);
     itemMesh.userData = { itemId: item.id, origW: item.w, origH: h, origD: item.d };
     scene.add(itemMesh);
     selectable3DMeshes.push(itemMesh);
@@ -514,7 +626,8 @@ function syncFPVCamera() {
   camera.position.set(h.x, eyeY, h.y);
 
   const yawRad = (h.rot || 0) * Math.PI / 180;
-  const pitchRad = (h.pitch || 0) * Math.PI / 180;
+  const pitchAngle = h.lock_horizontal ? 0 : (h.pitch || 0);
+  const pitchRad = pitchAngle * Math.PI / 180;
 
   const dirX = Math.sin(yawRad) * Math.cos(pitchRad);
   const dirY = Math.sin(pitchRad);
@@ -553,20 +666,25 @@ window.exitHumanFPV = function() {
 function animateThree() {
   requestAnimationFrame(animateThree);
 
+  let isHumanMovingNow = false;
+
+  // 點擊地面走動：速度調降為原本的 70% (3.8 * 0.7 = 2.66)
   if (walkTarget) {
     const dx = walkTarget.x - appState.human.x;
     const dy = walkTarget.y - appState.human.y;
     const dist = Math.hypot(dx, dy);
-    if (dist < 3.5) {
+    if (dist < 2.8) {
       tryMoveHumanTo(Math.round(walkTarget.x), Math.round(walkTarget.y), false);
       walkTarget = null;
       if (targetRingMesh) targetRingMesh.visible = false;
     } else {
-      const step = Math.min(dist, 3.8);
+      const step = Math.min(dist, 2.66);
       const nx = appState.human.x + (dx / dist) * step;
       const ny = appState.human.y + (dy / dist) * step;
       const moved = tryMoveHumanTo(nx, ny, true);
-      if (!moved) {
+      if (moved) {
+        isHumanMovingNow = true;
+      } else {
         walkTarget = null;
         if (targetRingMesh) targetRingMesh.visible = false;
       }
@@ -579,20 +697,25 @@ function animateThree() {
     if (currentMode === "FPV") syncFPVCamera();
   }
 
+  // 方向鍵與搖桿移動：速度調降為原本的 70% (3.2 * 0.7 = 2.24)
   if (fpvMoveDir.forward !== 0 || fpvMoveDir.right !== 0) {
-    const speed = 3.2;
+    const speed = 2.24;
     const yawRad = (appState.human.rot || 0) * Math.PI / 180;
     const fx = Math.sin(yawRad), fz = -Math.cos(yawRad);
     const rx = Math.cos(yawRad), rz = Math.sin(yawRad);
     const nx = appState.human.x + (fx * fpvMoveDir.forward + rx * fpvMoveDir.right) * speed;
     const ny = appState.human.y + (fz * fpvMoveDir.forward + rz * fpvMoveDir.right) * speed;
-    tryMoveHumanTo(nx, ny, true);
+    const moved = tryMoveHumanTo(nx, ny, true);
+    if (moved) isHumanMovingNow = true;
     if (human3DGroup) {
       human3DGroup.position.set(appState.human.x, appState.human.z || 0, appState.human.y);
     }
     initHumanFormValues();
     if (currentMode === "FPV") syncFPVCamera();
   }
+
+  // 驅動 3D 人物手腳自然走路擺動動畫
+  updateHumanWalkAnimation(isHumanMovingNow);
 
   if (currentMode !== "FPV" && controls && controls.enabled) {
     controls.update();
