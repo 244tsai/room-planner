@@ -37,7 +37,7 @@ function buildRealistic3DHuman(hData) {
     torsoMesh.position.set(0, 118 * s, 0);
     pelvisMesh.position.set(0, 86 * s, 0);
 
-    // 肩膀關節 Pivot (供走路擺手動畫旋轉)
+    // 肩膀關節軸心 (供走路自然擺手動畫旋轉)
     const armGeo = new THREE.CylinderGeometry(4.2 * s, 3.5 * s, 52 * s, 12);
     const armLPivot = new THREE.Group();
     armLPivot.position.set(-20 * s, 140 * s, 0);
@@ -51,7 +51,7 @@ function buildRealistic3DHuman(hData) {
     armRMesh.position.y = -26 * s;
     armRPivot.add(armRMesh);
 
-    // 髖關節 Pivot (供走路邁步擺腿動畫旋轉)
+    // 髖部關節軸心 (供走路自然邁步擺腿動畫旋轉)
     const legGeo = new THREE.CylinderGeometry(6 * s, 4.5 * s, 74 * s, 12);
     const shoeGeo = new THREE.BoxGeometry(10 * s, 7 * s, 22 * s);
 
@@ -146,7 +146,7 @@ function buildRealistic3DHuman(hData) {
   return group;
 }
 
-// 更新 3D 人物手腳走路擺動動畫
+// 驅動 3D 人物手腳走路擺動動畫
 function updateHumanWalkAnimation(isMoving) {
   if (!human3DGroup || !human3DGroup.userData.limbs) return;
   const limbs = human3DGroup.userData.limbs;
@@ -161,6 +161,36 @@ function updateHumanWalkAnimation(isMoving) {
     limbs.armR.rotation.x *= 0.75;
     limbs.legL.rotation.x *= 0.75;
     limbs.legR.rotation.x *= 0.75;
+  }
+}
+
+// 設定攝影機投影矩陣：
+// 在第一人稱視角 (FPV) 採用非對稱真實人眼視野：左右視角共 110 度 (±55°)、上視角 60 度、下視角 75 度！
+// 在 3D 鳥瞰模式則恢復標準對稱透視矩陣
+function applyCameraProjection() {
+  if (!camera) return;
+  const container = document.getElementById("three-container");
+  const w = Math.max(1, container.clientWidth);
+  const h = Math.max(1, container.clientHeight);
+  camera.aspect = w / h;
+
+  if (currentMode === "FPV") {
+    const near = 2;
+    const far = 6000;
+    const halfH = Math.tan(55 * Math.PI / 180) * near;   // 左右各 55 度 = 水平 110 度
+    const left = -halfH;
+    const right = halfH;
+    const top = Math.tan(60 * Math.PI / 180) * near;     // 上視角 60 度
+    const bottom = -Math.tan(75 * Math.PI / 180) * near; // 下視角 75 度
+    camera.projectionMatrix.makePerspective(left, right, top, bottom, near, far);
+    if (camera.projectionMatrixInverse) {
+      camera.projectionMatrixInverse.copy(camera.projectionMatrix).invert();
+    }
+  } else {
+    camera.fov = 65;
+    camera.near = 2;
+    camera.far = 6000;
+    camera.updateProjectionMatrix();
   }
 }
 
@@ -199,7 +229,6 @@ function attachGizmoWithRules(mesh) {
     transformControl.showZ = false;
     transformControl.showY = true;
   } else {
-    // 3D 縮放拉伸模式
     transformControl.showX = true;
     transformControl.showY = true;
     transformControl.showZ = true;
@@ -211,7 +240,7 @@ function initThree() {
   scene = new THREE.Scene();
   scene.background = new THREE.Color(0x0B0F17);
 
-  camera = new THREE.PerspectiveCamera(68, container.clientWidth / container.clientHeight, 2, 6000);
+  camera = new THREE.PerspectiveCamera(65, container.clientWidth / container.clientHeight, 2, 6000);
   camera.position.set(appState.room.width / 2, 420, appState.room.depth + 340);
 
   renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -239,51 +268,61 @@ function initThree() {
       trashEl.classList.remove("show", "hover");
       isOverTrash = false;
 
-      // 3D 拖曳或縮放放開後：執行物理防穿模、貼牆與牆外備用區約束，並重繪同步
       if (!event.value && activeId && activeId !== "HUMAN") {
-        const item = appState.items.find(i => i.id === activeId);
-        if (item) {
-          enforceItemConstraints(item, true);
-          updateLeftItemPanel();
-          renderFullScene();
-        }
+        renderFullScene();
       }
     }
   });
 
+  // 3D 即時移動、縮放、旋轉：每一幀即時套用「卡住在牆壁或障礙物邊緣」計算，不整段跳回原點！
   transformControl.addEventListener('change', function() {
-    if (!transformControl.object) return;
+    if (!transformControl.object || !transformControl.dragging) return;
     const obj = transformControl.object;
+
     if (obj.userData.isHuman) {
       obj.scale.set(1, 1, 1);
       const nx = Math.round(obj.position.x);
       const ny = Math.round(obj.position.z);
-      const check = checkHumanWalkable(nx, ny);
-      if (check.allowed) {
-        appState.human.x = nx;
-        appState.human.y = ny;
-        appState.human.z = check.baseZ;
-      }
+      tryMoveHumanTo(nx, ny, false);
       obj.position.set(appState.human.x, appState.human.z || 0, appState.human.y);
       appState.human.rot = Math.round((-obj.rotation.y * 180 / Math.PI % 360 + 360) % 360);
       initHumanFormValues();
+
     } else if (obj.userData.itemId) {
       const item = appState.items.find(i => i.id === obj.userData.itemId);
       if (!item) return;
-      if (transformControl.getMode() === "scale" && !appState.room.lock_scale) {
+
+      const curM = transformControl.getMode();
+      let mode = "move";
+      if (curM === "scale" && !appState.room.lock_scale) {
+        mode = "scale";
         item.w = Math.max(5, Math.round(obj.userData.origW * Math.abs(obj.scale.x)));
         item.h = Math.max(5, Math.min(appState.room.height, Math.round(obj.userData.origH * Math.abs(obj.scale.y))));
         item.d = Math.max(5, Math.round(obj.userData.origD * Math.abs(obj.scale.z)));
+      } else if (curM === "rotate") {
+        mode = "rotate";
       }
+
       item.x = Math.round(obj.position.x - item.w / 2);
       item.y = Math.round(obj.position.z - item.d / 2);
       if (isZAdjustableWallType(item.item_type)) {
         item.z = Math.max(0, Math.min(appState.room.height - (item.h || 30), Math.round(obj.position.y - (item.h || 30) / 2)));
       } else {
         item.z = 0;
-        obj.position.y = (item.h || 30) / 2;
       }
       item.rot = Math.round((-obj.rotation.y * 180 / Math.PI % 360 + 360) % 360);
+
+      // 即時套用物理卡住規則 (未滿牆壁 3/4 卡在牆內，超過 3/4 移出房外，碰到其他物品卡在邊緣)
+      enforceItemConstraints(item, mode, false);
+
+      const h = item.h || 30;
+      const zBottom = item.z || 0;
+      obj.position.set(item.x + item.w / 2, zBottom + h / 2, item.y + item.d / 2);
+      obj.rotation.y = -(item.rot || 0) * Math.PI / 180;
+      if (mode === "scale") {
+        obj.scale.set(item.w / obj.userData.origW, h / obj.userData.origH, item.d / obj.userData.origD);
+      }
+
       updateLeftItemPanel();
       renderRightPanel();
     }
@@ -316,9 +355,9 @@ function initThree() {
       fpvLastX = e.clientX;
       fpvLastY = e.clientY;
       appState.human.rot = ((appState.human.rot + dx * 0.32) % 360 + 360) % 360;
-      // 若未勾選「僅水平轉動」，才允許改變上下仰俯角
       if (!appState.human.lock_horizontal) {
-        appState.human.pitch = Math.max(-85, Math.min(85, (appState.human.pitch || 0) - dy * 0.32));
+        // 限制抬頭最多 +60 度、低頭最多 -75 度
+        appState.human.pitch = Math.max(-75, Math.min(60, (appState.human.pitch || 0) - dy * 0.32));
       }
       initHumanFormValues();
       syncFPVCamera();
@@ -516,7 +555,6 @@ function updateThreeScene() {
     const t = item.item_type || "furniture";
     let itemMesh;
 
-    // 判斷是否吸附在東西向側牆 (用於調整窗戶/插座/開關 3D 朝向)
     const isEastWestWall = (item.wall === "west" || item.wall === "east") || (item.d > item.w && isZAdjustableWallType(t));
     const faceW = isEastWestWall ? item.d : item.w;
     const thickD = isEastWestWall ? item.w : item.d;
@@ -586,7 +624,6 @@ function updateThreeScene() {
       if (isEastWestWall) itemMesh.rotation.y = Math.PI / 2;
 
     } else {
-      // 一般家具 或 牆壁上物品 (wall_item)
       const geo = new THREE.BoxGeometry(item.w, h, item.d);
       const mat = item.texture ? new THREE.MeshLambertMaterial({ map: texLoader.load(item.texture) }) : new THREE.MeshLambertMaterial({ color: item.color });
       itemMesh = new THREE.Mesh(geo, mat);
@@ -594,7 +631,6 @@ function updateThreeScene() {
       itemMesh.rotation.y = -(item.rot || 0) * Math.PI / 180;
     }
 
-    // 窗戶/開關/插座在 3D 繪製時若往牆外突出，讓內側邊緣貼齊牆面，確保室內外都能看清楚
     let posX = item.x + item.w / 2;
     let posZ = item.y + item.d / 2;
     if (isOuterWallProtrudingType(t)) {
@@ -621,6 +657,7 @@ function updateThreeScene() {
 
 function syncFPVCamera() {
   if (!camera) return;
+  applyCameraProjection();
   const h = appState.human;
   const eyeY = getHumanEyeHeight();
   camera.position.set(h.x, eyeY, h.y);
@@ -668,7 +705,6 @@ function animateThree() {
 
   let isHumanMovingNow = false;
 
-  // 點擊地面走動：速度調降為原本的 70% (3.8 * 0.7 = 2.66)
   if (walkTarget) {
     const dx = walkTarget.x - appState.human.x;
     const dy = walkTarget.y - appState.human.y;
@@ -697,7 +733,6 @@ function animateThree() {
     if (currentMode === "FPV") syncFPVCamera();
   }
 
-  // 方向鍵與搖桿移動：速度調降為原本的 70% (3.2 * 0.7 = 2.24)
   if (fpvMoveDir.forward !== 0 || fpvMoveDir.right !== 0) {
     const speed = 2.24;
     const yawRad = (appState.human.rot || 0) * Math.PI / 180;
@@ -714,7 +749,6 @@ function animateThree() {
     if (currentMode === "FPV") syncFPVCamera();
   }
 
-  // 驅動 3D 人物手腳自然走路擺動動畫
   updateHumanWalkAnimation(isHumanMovingNow);
 
   if (currentMode !== "FPV" && controls && controls.enabled) {
@@ -750,6 +784,7 @@ document.getElementById("btn-mode-3d").addEventListener("click", () => {
   document.getElementById("fpv-hud").style.display = "none";
 
   if (!renderer) initThree();
+  applyCameraProjection();
   controls.enabled = true;
   camera.position.set(appState.room.width / 2, 420, appState.room.depth + 340);
   controls.target.set(appState.room.width / 2, 60, appState.room.depth / 2);
@@ -766,8 +801,7 @@ window.addEventListener("resize", () => {
   }
   const c3d = document.getElementById("three-container");
   if (renderer && camera && c3d.clientWidth > 0) {
-    camera.aspect = c3d.clientWidth / c3d.clientHeight;
-    camera.updateProjectionMatrix();
     renderer.setSize(c3d.clientWidth, c3d.clientHeight);
+    applyCameraProjection();
   }
 });
