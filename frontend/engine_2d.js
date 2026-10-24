@@ -11,6 +11,7 @@ if (appState.room.show_ceiling === undefined) appState.room.show_ceiling = false
 if (appState.room.lock_scale === undefined) appState.room.lock_scale = false;
 if (appState.compass.auto_center === undefined) appState.compass.auto_center = true;
 
+// 初始八方座向中心位於地基長寬除以2，並隨地基改變連動
 if (appState.compass.auto_center) {
   appState.compass.x = Math.round(appState.room.width / 2);
   appState.compass.y = Math.round(appState.room.depth / 2);
@@ -41,6 +42,7 @@ let draggedItemId = null;
 // 記錄每個物件的上一幀合法狀態，供即時卡住(Clamp)使用，絕不整段跳回起點
 let lastValidItemMap = {};
 
+// 右側分類展開狀態：預設為空集合 = 全部收合
 let expandedCategories = new Set();
 
 function showToast(msg) {
@@ -193,13 +195,11 @@ function enforceItemConstraints(item, mode = "move", showMsg = false) {
       } else {
         // 未超過牆壁四分之三：直接讓它「卡住在牆壁內側邊緣」，不超過牆壁！
         if (mode === "scale") {
-          // 縮放時若碰到牆壁，限制最大長寬卡在牆邊
           if (box.x0 < 0 || box.x1 > rw) item.w = prev.w;
           if (box.y0 < 0 || box.y1 > rd) item.d = prev.d;
         } else if (mode === "rotate") {
           item.rot = prev.rot;
         }
-        // 重新取得邊界並將座標夾緊(Clamp)在牆壁內緣
         const clampedBox = getItemAABB(item);
         if (clampedBox.x0 < 0) item.x += (0 - clampedBox.x0);
         if (clampedBox.x1 > rw) item.x -= (clampedBox.x1 - rw);
@@ -220,11 +220,9 @@ function enforceItemConstraints(item, mode = "move", showMsg = false) {
       item.w = targetW; item.d = prev.d; item.h = prev.h;
       if (hasAnyCollision(item)) item.w = prev.w;
 
-      const safeW = item.w;
       item.d = targetD;
       if (hasAnyCollision(item)) item.d = prev.d;
 
-      const safeD = item.d;
       item.h = targetH;
       if (hasAnyCollision(item)) item.h = prev.h;
 
@@ -237,10 +235,10 @@ function enforceItemConstraints(item, mode = "move", showMsg = false) {
       const boxA = getItemAABB(item);
       const boxB = getItemAABB(hitOther);
 
-      const pushLeft = boxA.x1 - boxB.x0;   // 將 A 往左推離 B
-      const pushRight = boxB.x1 - boxA.x0;  // 將 A 往右推離 B
-      const pushUp = boxA.y1 - boxB.y0;     // 將 A 往上推離 B
-      const pushDown = boxB.y1 - boxA.y0;   // 將 A 往下推離 B
+      const pushLeft = boxA.x1 - boxB.x0;
+      const pushRight = boxB.x1 - boxA.x0;
+      const pushUp = boxA.y1 - boxB.y0;
+      const pushDown = boxB.y1 - boxA.y0;
 
       const minPush = Math.min(pushLeft, pushRight, pushUp, pushDown);
       if (minPush === pushLeft) item.x -= pushLeft;
@@ -248,7 +246,6 @@ function enforceItemConstraints(item, mode = "move", showMsg = false) {
       else if (minPush === pushUp) item.y -= pushUp;
       else item.y += pushDown;
 
-      // 推離貼齊後，若同時在牆內則確保不因此超出牆壁
       const afterBox = getItemAABB(item);
       const wasInside = (prev.x >= 0 && prev.x + prev.w <= rw && prev.y >= 0 && prev.y + prev.d <= rd);
       if (wasInside) {
@@ -258,7 +255,6 @@ function enforceItemConstraints(item, mode = "move", showMsg = false) {
         if (afterBox.y1 > rd) item.y -= (afterBox.y1 - rd);
       }
 
-      // 若多物件夾擊仍重疊，嘗試單軸滑動 (只動 X 或只動 Y)
       if (hasAnyCollision(item)) {
         const tryX = item.x, tryY = item.y;
         item.x = tryX; item.y = prev.y;
@@ -1307,4 +1303,624 @@ document.getElementById("room-editable-lock").addEventListener("change", functio
 function renderVoidListUI() {
   const container = document.getElementById("void-list-container");
   container.innerHTML = "";
-  const disabledAttr
+  const disabledAttr = appState.room.editable ? "" : "disabled";
+
+  appState.voids.forEach((v, idx) => {
+    const card = document.createElement("div");
+    card.style.cssText = "background:#1F232B; border:1px solid #334155; border-radius:6px; padding:7px; margin-bottom:5px; display:flex; flex-direction:column; gap:5px;";
+    card.innerHTML = `
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:4px;">
+        <input type="text" value="${v.name}" ${disabledAttr} oninput="updateVoidField(${idx}, 'name', this.value)" style="font-weight:600;">
+        <button class="danger" ${disabledAttr} onclick="deleteVoidArea(${idx})" style="padding:3px 6px; font-size:11px; flex-shrink:0;">🗑️</button>
+      </div>
+      <div class="field-row">
+        <div><span style="font-size:10px;color:#94A3B8;">寬 W</span><input type="number" value="${Math.round(v.w)}" ${disabledAttr} oninput="updateVoidField(${idx}, 'w', this.value)"></div>
+        <div><span style="font-size:10px;color:#94A3B8;">深 D</span><input type="number" value="${Math.round(v.d)}" ${disabledAttr} oninput="updateVoidField(${idx}, 'd', this.value)"></div>
+        <div><span style="font-size:10px;color:#94A3B8;">X 坐標</span><input type="number" value="${Math.round(v.x)}" ${disabledAttr} oninput="updateVoidField(${idx}, 'x', this.value)"></div>
+        <div><span style="font-size:10px;color:#94A3B8;">Y 坐標</span><input type="number" value="${Math.round(v.y)}" ${disabledAttr} oninput="updateVoidField(${idx}, 'y', this.value)"></div>
+      </div>
+    `;
+    container.appendChild(card);
+  });
+}
+
+window.updateVoidField = function(idx, field, val) {
+  if (!appState.voids[idx]) return;
+  if (field === 'name') appState.voids[idx].name = val;
+  else {
+    if (val === "" || val === "-") return;
+    appState.voids[idx][field] = parseFloat(val) || 0;
+  }
+  renderFullScene();
+};
+
+window.addVoidArea = function() {
+  if (!appState.room.editable) {
+    alert("💡 請先勾選上方「🔓 勾選才可拖曳/改動留白處」！");
+    return;
+  }
+  appState.voids.push({ id: "void_" + Date.now(), name: `留白處 ${appState.voids.length + 1}`, x: 50, y: 50, w: 80, d: 80 });
+  renderVoidListUI();
+  renderFullScene();
+};
+
+window.deleteVoidArea = function(idx) {
+  appState.voids.splice(idx, 1);
+  renderVoidListUI();
+  renderFullScene();
+};
+
+function initRoomFormValues() {
+  document.getElementById("room-editable-lock").checked = !!appState.room.editable;
+  setInputValueSafe("room-w", appState.room.width);
+  setInputValueSafe("room-d", appState.room.depth);
+  setInputValueSafe("room-h", appState.room.height);
+  document.getElementById("room-show-walls").checked = !!appState.room.show_walls;
+  document.getElementById("room-show-ceiling").checked = !!appState.room.show_ceiling;
+  setInputValueSafe("room-wall-color", appState.room.wall_color || "#F8FAFC");
+  setInputValueSafe("room-ceil-color", appState.room.ceiling_color || "#FFFFFF");
+
+  document.getElementById("compass-show").checked = appState.compass.show;
+  document.getElementById("compass-auto-center").checked = !!appState.compass.auto_center;
+  setInputValueSafe("compass-x", appState.compass.x);
+  setInputValueSafe("compass-y", appState.compass.y);
+  setInputValueSafe("compass-rot", appState.compass.rotation || 0);
+  setInputValueSafe("compass-rot-slider", appState.compass.rotation || 0);
+  document.getElementById("compass-rot-val").innerText = (appState.compass.rotation || 0) + "°";
+
+  document.getElementById("feixing-show").checked = !!appState.compass.show_feixing;
+  setInputValueSafe("feixing-year", appState.compass.feixing_year || 2026);
+}
+
+function syncRoomFromInputs(e) {
+  if (e && (e.target.value === "" || e.target.value === "-")) return;
+  const targetId = e ? e.target.id : "";
+
+  appState.room.width = parseFloat(document.getElementById("room-w").value) || 400;
+  appState.room.depth = parseFloat(document.getElementById("room-d").value) || 300;
+  appState.room.height = parseFloat(document.getElementById("room-h").value) || 280;
+  appState.room.show_walls = document.getElementById("room-show-walls").checked;
+  appState.room.show_ceiling = document.getElementById("room-show-ceiling").checked;
+  appState.room.wall_color = document.getElementById("room-wall-color").value;
+  appState.room.ceiling_color = document.getElementById("room-ceil-color").value;
+
+  appState.compass.show = document.getElementById("compass-show").checked;
+  appState.compass.auto_center = document.getElementById("compass-auto-center").checked;
+
+  if (targetId === "compass-x" || targetId === "compass-y") {
+    appState.compass.auto_center = false;
+    document.getElementById("compass-auto-center").checked = false;
+    appState.compass.x = parseFloat(document.getElementById("compass-x").value) || 200;
+    appState.compass.y = parseFloat(document.getElementById("compass-y").value) || 150;
+  } else if (appState.compass.auto_center || targetId === "room-w" || targetId === "room-d") {
+    appState.compass.x = Math.round(appState.room.width / 2);
+    appState.compass.y = Math.round(appState.room.depth / 2);
+    setInputValueSafe("compass-x", appState.compass.x);
+    setInputValueSafe("compass-y", appState.compass.y);
+  }
+
+  appState.compass.rotation = parseFloat(document.getElementById("compass-rot").value) || 0;
+  setInputValueSafe("compass-rot-slider", appState.compass.rotation);
+  document.getElementById("compass-rot-val").innerText = appState.compass.rotation + "°";
+
+  appState.compass.show_feixing = document.getElementById("feixing-show").checked;
+  appState.compass.feixing_year = parseInt(document.getElementById("feixing-year").value) || 2026;
+
+  appState.items.forEach(it => enforceItemConstraints(it, "move", false));
+  renderFullScene();
+}
+
+document.querySelectorAll(".live-room-input").forEach(el => {
+  el.addEventListener("input", syncRoomFromInputs);
+});
+document.getElementById("compass-rot-slider").addEventListener("input", e => {
+  document.getElementById("compass-rot").value = e.target.value;
+  syncRoomFromInputs();
+});
+
+document.getElementById("wall-texture-file").addEventListener("change", function(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = function(f) {
+    appState.room.wall_texture = f.target.result;
+    if (renderer) updateThreeScene();
+  };
+  reader.readAsDataURL(file);
+});
+document.getElementById("ceil-texture-file").addEventListener("change", function(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = function(f) {
+    appState.room.ceiling_texture = f.target.result;
+    appState.room.show_ceiling = true;
+    document.getElementById("room-show-ceiling").checked = true;
+    if (renderer) updateThreeScene();
+  };
+  reader.readAsDataURL(file);
+});
+
+window.toggleLockHorizFPV = function() {
+  appState.human.lock_horizontal = !appState.human.lock_horizontal;
+  if (appState.human.lock_horizontal) {
+    appState.human.pitch = 0;
+  }
+  initHumanFormValues();
+  if (currentMode === "FPV") syncFPVCamera();
+};
+
+document.getElementById("human-lock-horiz").addEventListener("change", e => {
+  appState.human.lock_horizontal = e.target.checked;
+  if (appState.human.lock_horizontal) {
+    appState.human.pitch = 0;
+  }
+  initHumanFormValues();
+  if (currentMode === "FPV") syncFPVCamera();
+});
+
+function initHumanFormValues() {
+  const h = appState.human;
+  const eyeH = getHumanEyeHeight();
+  const lockH = !!h.lock_horizontal;
+
+  document.getElementById("human-lock-horiz").checked = lockH;
+  const hudLockBtn = document.getElementById("hud-btn-lock-h");
+  if (hudLockBtn) {
+    hudLockBtn.innerText = lockH ? "🔒水平" : "🔓自由";
+    hudLockBtn.classList.toggle("active", lockH);
+  }
+  document.getElementById("human-pitch-slider").disabled = lockH;
+  document.getElementById("human-pitch").disabled = lockH;
+  document.getElementById("hud-pitch-slider").disabled = lockH;
+
+  setInputValueSafe("human-height", h.height || 178);
+  setInputValueSafe("human-x", Math.round(h.x));
+  setInputValueSafe("human-y", Math.round(h.y));
+  setInputValueSafe("human-rot", Math.round(h.rot || 0));
+  setInputValueSafe("human-rot-slider", Math.round(h.rot || 0));
+  document.getElementById("human-rot-val").innerText = Math.round(h.rot || 0) + "°";
+
+  setInputValueSafe("human-pitch", Math.round(h.pitch || 0));
+  setInputValueSafe("human-pitch-slider", Math.round(h.pitch || 0));
+  setInputValueSafe("hud-pitch-slider", Math.round(h.pitch || 0));
+  document.getElementById("human-pitch-val").innerText = Math.round(h.pitch || 0) + "°";
+  document.getElementById("hud-pitch-lbl").innerText = Math.round(h.pitch || 0) + "°";
+
+  document.getElementById("human-eye-info").innerText = `眼高: ${eyeH} cm`;
+  document.getElementById("human-basez-info").innerText = `踏面Z: ${Math.round(h.z || 0)} cm ${h.z > 0 ? '(床上)' : ''}`;
+  const hudEyeLbl = document.getElementById("hud-eye-height-lbl");
+  if (hudEyeLbl) hudEyeLbl.innerText = `眼高:${eyeH}cm (Z:${Math.round(h.z || 0)})`;
+
+  const p = h.posture || "stand";
+  ["stand", "sit", "lie"].forEach(mode => {
+    const b1 = document.getElementById("btn-posture-" + mode);
+    const b2 = document.getElementById("hud-btn-" + mode);
+    if (b1) b1.classList.toggle("active", p === mode);
+    if (b2) b2.classList.toggle("active", p === mode);
+  });
+}
+
+["human-height", "human-x", "human-y", "human-rot", "human-pitch"].forEach(id => {
+  document.getElementById(id).addEventListener("input", e => {
+    if (e.target.value === "" || e.target.value === "-") return;
+    const val = parseFloat(e.target.value) || 0;
+    if (id === "human-height") appState.human.height = Math.max(60, val);
+    if (id === "human-x") tryMoveHumanTo(val, appState.human.y, true);
+    if (id === "human-y") tryMoveHumanTo(appState.human.x, val, true);
+    if (id === "human-rot") appState.human.rot = ((val % 360) + 360) % 360;
+    if (id === "human-pitch" && !appState.human.lock_horizontal) appState.human.pitch = Math.max(-75, Math.min(60, val));
+    initHumanFormValues();
+    renderFullScene();
+    if (currentMode === "FPV") syncFPVCamera();
+  });
+});
+
+document.getElementById("human-rot-slider").addEventListener("input", e => {
+  appState.human.rot = parseFloat(e.target.value) || 0;
+  initHumanFormValues();
+  renderFullScene();
+  if (currentMode === "FPV") syncFPVCamera();
+});
+
+document.getElementById("human-pitch-slider").addEventListener("input", e => {
+  if (appState.human.lock_horizontal) return;
+  appState.human.pitch = parseFloat(e.target.value) || 0;
+  initHumanFormValues();
+  if (currentMode === "FPV") syncFPVCamera();
+});
+
+document.getElementById("hud-pitch-slider").addEventListener("input", e => {
+  if (appState.human.lock_horizontal) return;
+  appState.human.pitch = parseFloat(e.target.value) || 0;
+  initHumanFormValues();
+  if (currentMode === "FPV") syncFPVCamera();
+});
+
+window.setHumanPosture = function(p) {
+  appState.human.posture = p;
+  if (!appState.human.lock_horizontal) {
+    if (p === "lie") {
+      appState.human.pitch = 35;
+      appState.room.show_ceiling = true;
+      document.getElementById("room-show-ceiling").checked = true;
+    } else if (p === "sit") {
+      appState.human.pitch = -5;
+    } else {
+      appState.human.pitch = 0;
+    }
+  }
+  const check = checkHumanWalkable(appState.human.x, appState.human.y);
+  appState.human.z = check.baseZ;
+  initHumanFormValues();
+  renderFullScene();
+  if (currentMode === "FPV") syncFPVCamera();
+};
+
+window.placeHumanOnBed = function(targetPosture = 'lie') {
+  const bed = appState.items.find(i => isBedItem(i));
+  if (bed) {
+    appState.human.x = Math.round(bed.x + bed.w / 2);
+    appState.human.y = Math.round(bed.y + (targetPosture === 'sit' ? bed.d * 0.78 : bed.d * 0.35));
+    appState.human.z = (bed.z || 0) + (bed.h || 55);
+    appState.human.rot = 180;
+  }
+  setHumanPosture(targetPosture);
+  enterHumanFPV();
+};
+
+function renderRightPanel() {
+  const container = document.getElementById("item-list-container");
+  document.getElementById("obj-count").innerText = `共 ${appState.items.length} 項`;
+  container.innerHTML = "";
+
+  const badgeMap = {
+    furniture: { text: "家具", cls: "" },
+    wall_item: { text: "🖼️ 牆物", cls: "win" },
+    door: { text: "🚪 門", cls: "door" },
+    window: { text: "🪟 窗", cls: "win" },
+    socket: { text: "🔌 插座", cls: "win" },
+    switch: { text: "💡 開關", cls: "win" }
+  };
+
+  appState.categories.forEach(cat => {
+    const catItems = appState.items.filter(it => (it.category || appState.categories[0]) === cat);
+    const sec = document.createElement("div");
+    sec.className = "cat-section";
+    sec.setAttribute("data-cat", cat);
+
+    sec.addEventListener("dragover", e => {
+      e.preventDefault();
+      sec.classList.add("drag-over");
+    });
+    sec.addEventListener("dragleave", () => sec.classList.remove("drag-over"));
+    sec.addEventListener("drop", e => {
+      e.preventDefault();
+      sec.classList.remove("drag-over");
+      if (draggedItemId) moveItemToCategory(draggedItemId, cat);
+    });
+
+    const isExpanded = expandedCategories.has(cat);
+    const header = document.createElement("div");
+    header.className = "cat-header";
+    header.innerHTML = `<span>${isExpanded ? '📂' : '📁'} ${cat} ${cat === '床' ? '🛏️' : ''}</span><span style="font-size:11px;color:#64748B;">${catItems.length} 項 ${isExpanded ? '▾' : '▸'}</span>`;
+
+    const listBox = document.createElement("div");
+    listBox.className = "cat-items";
+    listBox.style.display = isExpanded ? "flex" : "none";
+
+    header.onclick = () => {
+      if (expandedCategories.has(cat)) expandedCategories.delete(cat);
+      else expandedCategories.add(cat);
+      renderRightPanel();
+    };
+
+    catItems.forEach(item => {
+      const card = document.createElement("div");
+      card.className = "item-card" + (item.id === activeId ? " selected" : "");
+      card.draggable = true;
+      card.onclick = () => selectItemById(item.id);
+
+      card.addEventListener("dragstart", e => {
+        draggedItemId = item.id;
+        card.classList.add("dragging");
+        e.dataTransfer.setData("text/plain", item.id);
+      });
+      card.addEventListener("dragend", () => {
+        card.classList.remove("dragging");
+        draggedItemId = null;
+        document.querySelectorAll(".cat-section").forEach(s => s.classList.remove("drag-over"));
+      });
+
+      let touchTimer = null;
+      let isTouchDraggingCard = false;
+      card.addEventListener("touchstart", e => {
+        touchTimer = setTimeout(() => {
+          isTouchDraggingCard = true;
+          draggedItemId = item.id;
+          card.classList.add("dragging");
+        }, 280);
+      }, { passive: true });
+
+      card.addEventListener("touchmove", e => {
+        if (!isTouchDraggingCard) { clearTimeout(touchTimer); return; }
+        e.preventDefault();
+        const t = e.touches[0];
+        const elUnder = document.elementFromPoint(t.clientX, t.clientY);
+        document.querySelectorAll(".cat-section").forEach(s => s.classList.remove("drag-over"));
+        const targetSec = elUnder ? elUnder.closest(".cat-section") : null;
+        if (targetSec) targetSec.classList.add("drag-over");
+      }, { passive: false });
+
+      card.addEventListener("touchend", e => {
+        clearTimeout(touchTimer);
+        if (!isTouchDraggingCard) return;
+        isTouchDraggingCard = false;
+        card.classList.remove("dragging");
+        const t = e.changedTouches[0];
+        const elUnder = document.elementFromPoint(t.clientX, t.clientY);
+        const targetSec = elUnder ? elUnder.closest(".cat-section") : null;
+        document.querySelectorAll(".cat-section").forEach(s => s.classList.remove("drag-over"));
+        if (targetSec && targetSec.getAttribute("data-cat")) {
+          moveItemToCategory(item.id, targetSec.getAttribute("data-cat"));
+        }
+        draggedItemId = null;
+      });
+
+      const b = badgeMap[item.item_type || "furniture"] || badgeMap.furniture;
+      card.innerHTML = `
+        <div class="item-card-header">
+          <div class="name">
+            <span style="color:#64748B;font-size:11px;cursor:grab;">⠿</span>
+            <span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${item.color};border:1px solid #fff;"></span>
+            <span>${item.name}</span>
+            <span class="badge ${b.cls}">${b.text}</span>
+          </div>
+          <button class="card-del-btn" title="刪除" onclick="deleteItemById('${item.id}', event)">🗑️</button>
+        </div>
+        <div class="dims">
+          ${Math.round(item.w)}×${Math.round(item.d)}×${item.h || 30} | Z:${item.z || 0} | ${item.rot || 0}°
+        </div>
+      `;
+      listBox.appendChild(card);
+    });
+
+    sec.appendChild(header);
+    sec.appendChild(listBox);
+    container.appendChild(sec);
+  });
+}
+
+function highlightRightPanel() {
+  renderRightPanel();
+}
+
+function selectItemById(id) {
+  activeId = id;
+  if (currentMode === "2D") {
+    const group = canvas.getObjects().find(o => o.itemId === id);
+    if (group && !forcePanMode) {
+      canvas.setActiveObject(group);
+      canvas.requestRenderAll();
+    }
+  } else if (currentMode === "3D" && transformControl) {
+    const mesh = selectable3DMeshes.find(m => m.userData.itemId === id);
+    if (mesh) attachGizmoWithRules(mesh);
+  }
+  switchLeftTab('item');
+  updateLeftItemPanel();
+  highlightRightPanel();
+}
+
+function zoomToFit() {
+  if (!canvas) return;
+  const rw = appState.room.width, rd = appState.room.depth;
+  const container = document.getElementById("canvas-container");
+  const cw = container.clientWidth - 90, ch = container.clientHeight - 90;
+  const scale = Math.min(cw / rw, ch / rd, 1.65);
+  const offsetX = (container.clientWidth - rw * scale) / 2;
+  const offsetY = (container.clientHeight - rd * scale) / 2;
+  canvas.setViewportTransform([scale, 0, 0, scale, offsetX, offsetY]);
+  canvas.requestRenderAll();
+}
+
+document.getElementById("btn-zoom-fit").addEventListener("click", zoomToFit);
+document.getElementById("btn-zoom-in").addEventListener("click", () => canvas.setZoom(Math.min(canvas.getZoom() * 1.2, 5)));
+document.getElementById("btn-zoom-out").addEventListener("click", () => canvas.setZoom(Math.max(canvas.getZoom() / 1.2, 0.2)));
+document.getElementById("btn-pan-toggle").addEventListener("click", function() {
+  forcePanMode = !forcePanMode;
+  this.innerText = forcePanMode ? "✋ 平移: 開" : "✋ 平移: 關";
+  this.classList.toggle("active", forcePanMode);
+  renderFullScene();
+});
+
+document.getElementById("btn-save-local").addEventListener("click", () => {
+  localStorage.setItem("room_planner_v8", JSON.stringify(appState));
+  alert("✅ 已成功儲存於 App 本地記憶中！");
+});
+
+document.getElementById("btn-load-local").addEventListener("click", () => {
+  const saved = localStorage.getItem("room_planner_v8") || localStorage.getItem("room_planner_v7") || localStorage.getItem("room_planner_v6");
+  if (saved) {
+    appState = JSON.parse(saved);
+    if (!appState.categories) appState.categories = ["床", "大型家具", "收納櫃體", "門窗建材", "機電開關", "牆面裝飾"];
+    if (!appState.categories.includes("床")) appState.categories.unshift("床");
+    if (!appState.human) appState.human = { x: 230, y: 230, z: 0, height: 178, rot: 0, pitch: 0, posture: "stand", lock_horizontal: false };
+    appState.items.forEach(it => saveValidItemBackup(it));
+    renderCategoryUI();
+    initRoomFormValues();
+    initHumanFormValues();
+    syncLockScaleUI();
+    renderVoidListUI();
+    renderFullScene();
+    zoomToFit();
+    alert("✅ 已成功載入儲存的設計！");
+  } else {
+    alert("⚠️ 尚未找到本地存檔紀錄！");
+  }
+});
+
+document.getElementById("btn-export-file").addEventListener("click", () => {
+  const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(appState, null, 2));
+  const a = document.createElement('a');
+  a.setAttribute("href", dataStr);
+  a.setAttribute("download", "room_design_" + new Date().toISOString().slice(0, 10) + ".json");
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+});
+
+document.getElementById("file-import").addEventListener("change", function(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = function(evt) {
+    try {
+      appState = JSON.parse(evt.target.result);
+      if (!appState.categories) appState.categories = ["床", "大型家具", "收納櫃體", "門窗建材", "機電開關", "牆面裝飾"];
+      if (!appState.categories.includes("床")) appState.categories.unshift("床");
+      if (!appState.human) appState.human = { x: 230, y: 230, z: 0, height: 178, rot: 0, pitch: 0, posture: "stand", lock_horizontal: false };
+      appState.items.forEach(it => saveValidItemBackup(it));
+      renderCategoryUI();
+      initRoomFormValues();
+      initHumanFormValues();
+      syncLockScaleUI();
+      renderVoidListUI();
+      renderFullScene();
+      zoomToFit();
+      alert("✅ 專案檔案載入成功！");
+    } catch(err) {
+      alert("❌ 檔案格式錯誤！");
+    }
+  };
+  reader.readAsText(file);
+});
+
+document.getElementById("btn-reset-default").addEventListener("click", () => {
+  if (confirm("確定要重置回附圖原始預設配置嗎？")) {
+    appState = JSON.parse(JSON.stringify(INITIAL_CONFIG));
+    appState.items.forEach(it => saveValidItemBackup(it));
+    renderCategoryUI();
+    initRoomFormValues();
+    initHumanFormValues();
+    syncLockScaleUI();
+    renderVoidListUI();
+    renderFullScene();
+    zoomToFit();
+  }
+});
+
+// 左右面板寬度拖曳改變大小
+function initPanelResizers() {
+  const leftPanel = document.getElementById("left-panel");
+  const rightPanel = document.getElementById("right-panel");
+  const leftResizer = document.getElementById("left-resizer");
+  const rightResizer = document.getElementById("right-resizer");
+
+  let resizingSide = null;
+
+  const startResize = (side, e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    resizingSide = side;
+  };
+
+  if (leftResizer) leftResizer.addEventListener("pointerdown", e => startResize("left", e));
+  if (rightResizer) rightResizer.addEventListener("pointerdown", e => startResize("right", e));
+
+  window.addEventListener("pointermove", e => {
+    if (!resizingSide) return;
+    if (resizingSide === "left") {
+      const newW = Math.max(145, Math.min(window.innerWidth * 0.88, e.clientX));
+      leftPanel.style.width = newW + "px";
+    } else if (resizingSide === "right") {
+      const newW = Math.max(145, Math.min(window.innerWidth * 0.88, window.innerWidth - e.clientX));
+      rightPanel.style.width = newW + "px";
+    }
+    window.dispatchEvent(new Event("resize"));
+  });
+
+  window.addEventListener("pointerup", () => {
+    resizingSide = null;
+  });
+
+  document.querySelectorAll("input, select").forEach(el => {
+    el.addEventListener("focus", () => {
+      setTimeout(() => {
+        el.scrollIntoView({ behavior: "smooth", block: "center" });
+      }, 280);
+    });
+  });
+
+  const newCatSel = document.getElementById("new-obj-category");
+  if (newCatSel) newCatSel.addEventListener("change", window.onNewObjTypeChange);
+}
+
+// 第一人稱控制框 (HUD) 自由拖曳位置 + 右下角無段縮放大小 + 折疊收納
+window.toggleMinimizeFPVHud = function() {
+  const hud = document.getElementById("fpv-hud");
+  const btn = document.getElementById("btn-fpv-min");
+  hud.classList.toggle("minimized");
+  btn.innerText = hud.classList.contains("minimized") ? "□" : "—";
+};
+
+function initFPVHudDragAndResize() {
+  const hud = document.getElementById("fpv-hud");
+  const dragBar = document.getElementById("fpv-hud-drag");
+  const resizer = document.getElementById("fpv-hud-resizer");
+  if (!hud || !dragBar || !resizer) return;
+
+  let isDraggingHud = false;
+  let isResizingHud = false;
+  let startX = 0, startY = 0;
+  let origLeft = 0, origTop = 0;
+  let currentScale = 1.0;
+  let startScale = 1.0;
+
+  dragBar.addEventListener("pointerdown", e => {
+    if (e.target.tagName.toLowerCase() === "button") return;
+    e.preventDefault();
+    e.stopPropagation();
+    isDraggingHud = true;
+    const rect = hud.getBoundingClientRect();
+    const parentRect = hud.parentElement.getBoundingClientRect();
+    origLeft = rect.left - parentRect.left;
+    origTop = rect.top - parentRect.top;
+    hud.style.left = origLeft + "px";
+    hud.style.top = origTop + "px";
+    hud.style.right = "auto";
+    hud.style.bottom = "auto";
+    startX = e.clientX;
+    startY = e.clientY;
+  });
+
+  resizer.addEventListener("pointerdown", e => {
+    e.preventDefault();
+    e.stopPropagation();
+    isResizingHud = true;
+    startX = e.clientX;
+    startY = e.clientY;
+    startScale = currentScale;
+  });
+
+  window.addEventListener("pointermove", e => {
+    if (isDraggingHud) {
+      const parentRect = hud.parentElement.getBoundingClientRect();
+      let nx = origLeft + (e.clientX - startX);
+      let ny = origTop + (e.clientY - startY);
+      nx = Math.max(4, Math.min(parentRect.width - 90, nx));
+      ny = Math.max(48, Math.min(parentRect.height - 60, ny));
+      hud.style.left = nx + "px";
+      hud.style.top = ny + "px";
+    } else if (isResizingHud) {
+      const delta = (e.clientX - startX + e.clientY - startY) * 0.004;
+      currentScale = Math.max(0.55, Math.min(1.35, startScale + delta));
+      hud.style.transform = `scale(${currentScale})`;
+    }
+  });
+
+  window.addEventListener("pointerup", () => {
+    isDraggingHud = false;
+    isResizingHud = false;
+  });
+}
