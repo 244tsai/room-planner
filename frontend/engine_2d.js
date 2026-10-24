@@ -2,12 +2,20 @@ let appState = JSON.parse(JSON.stringify(INITIAL_CONFIG));
 if (!appState.voids && appState.void) {
   appState.voids = [{ id: "void_1", name: "留白處 1", x: appState.void.x, y: appState.void.y, w: appState.void.w, d: appState.void.d }];
 }
-if (!appState.categories) appState.categories = ["床", "大型家具", "收納櫃體", "門窗建材", "機電開關"];
+if (!appState.categories) appState.categories = ["床", "大型家具", "收納櫃體", "門窗建材", "機電開關", "牆面裝飾"];
 if (!appState.categories.includes("床")) appState.categories.unshift("床");
 appState.items.forEach(it => { if (it.id === "bed" || it.name === "床") it.category = "床"; });
-if (!appState.human) appState.human = { x: 230, y: 230, z: 0, height: 178, rot: 0, pitch: 0, posture: "stand" };
+if (!appState.human) appState.human = { x: 230, y: 230, z: 0, height: 178, rot: 0, pitch: 0, posture: "stand", lock_horizontal: false };
 if (appState.room.show_walls === undefined) appState.room.show_walls = true;
 if (appState.room.show_ceiling === undefined) appState.room.show_ceiling = false;
+if (appState.room.lock_scale === undefined) appState.room.lock_scale = false;
+if (appState.compass.auto_center === undefined) appState.compass.auto_center = true;
+
+// 若啟用自動置中，確保初始八方座向中心位於地基長寬除以2
+if (appState.compass.auto_center) {
+  appState.compass.x = Math.round(appState.room.width / 2);
+  appState.compass.y = Math.round(appState.room.depth / 2);
+}
 
 let activeId = null;
 let canvas, scene, camera, renderer, controls, transformControl;
@@ -31,7 +39,10 @@ let fpvLastX = 0, fpvLastY = 0;
 let toastTimeout = null;
 let draggedItemId = null;
 
-// 右側分類展開狀態紀錄：預設為空集合 = 預設全部縮起來不展開！
+// 記錄每個物件最後一次合法不重疊的位置與尺寸，供碰撞退回使用
+let lastValidItemMap = {};
+
+// 右側分類展開狀態：預設全部收合
 let expandedCategories = new Set();
 
 function showToast(msg) {
@@ -40,13 +51,196 @@ function showToast(msg) {
   el.innerText = msg;
   el.classList.add("show");
   if (toastTimeout) clearTimeout(toastTimeout);
-  toastTimeout = setTimeout(() => el.classList.remove("show"), 1800);
+  toastTimeout = setTimeout(() => el.classList.remove("show"), 1900);
 }
 
 function isBedItem(it) {
   return it.category === "床" || it.id === "bed" || (it.name && it.name.includes("床") && !it.name.includes("櫃"));
 }
 
+// 判斷是否為可調整 Z 軸的牆面物件 (窗戶、插座、開關、牆壁上物品)
+function isZAdjustableWallType(t) {
+  return ["window", "socket", "switch", "wall_item"].includes(t);
+}
+
+// 判斷是否為往牆壁外側突出的牆面設施 (窗戶、插座、開關)
+function isOuterWallProtrudingType(t) {
+  return ["window", "socket", "switch"].includes(t);
+}
+
+// 取得物件旋轉後的軸對齊邊界框 (AABB)
+function getItemAABB(it) {
+  const rad = (it.rot || 0) * Math.PI / 180;
+  const cx = it.x + it.w / 2;
+  const cy = it.y + it.d / 2;
+  const cos = Math.abs(Math.cos(rad));
+  const sin = Math.abs(Math.sin(rad));
+  const bw = it.w * cos + it.d * sin;
+  const bd = it.w * sin + it.d * cos;
+  return {
+    x0: cx - bw / 2,
+    y0: cy - bd / 2,
+    x1: cx + bw / 2,
+    y1: cy + bd / 2,
+    z0: it.z || 0,
+    z1: (it.z || 0) + (it.h || 30)
+  };
+}
+
+// 檢查兩個物件是否在 3D 空間 (X, Y, Z) 發生穿模重疊
+function isTwoItemsOverlapping(a, b) {
+  const boxA = getItemAABB(a);
+  const boxB = getItemAABB(b);
+  const eps = 0.5; // 允許貼齊邊界 0.5cm 容差
+  const overlapX = (boxA.x0 + eps < boxB.x1) && (boxA.x1 - eps > boxB.x0);
+  const overlapY = (boxA.y0 + eps < boxB.y1) && (boxA.y1 - eps > boxB.y0);
+  const overlapZ = (boxA.z0 + eps < boxB.z1) && (boxA.z1 - eps > boxB.z0);
+  return overlapX && overlapY && overlapZ;
+}
+
+// 強制執行所有物理約束：
+// 1. 高度防穿模 (不可低於地板 Z<0、不可高於天花板 Z+H > roomH)
+// 2. 除窗戶/插座/開關/牆壁上物品外，其餘物件一律強制在地板上 (Z=0)
+// 3. 牆上物品/窗戶/開關/插座/門：強制吸附於四面牆壁，不可懸空飄在房內；其中窗戶/插座/開關往牆壁外側突出
+// 4. 一般地面物件若超過牆壁邊界，直接移出至房間外備用區 (不卡在牆上穿模)
+// 5. 檢查與其他所有物品是否重疊穿模
+function enforceItemConstraints(item, showMsg = true) {
+  const rw = appState.room.width;
+  const rd = appState.room.depth;
+  const rh = appState.room.height;
+  const t = item.item_type || "furniture";
+
+  // 限制物品自身高度不可超過天花板
+  if ((item.h || 30) > rh) item.h = rh;
+
+  // Z 軸與地板/天花板防穿模
+  if (isZAdjustableWallType(t)) {
+    item.z = Math.max(0, Math.min(rh - (item.h || 30), Math.round(item.z || 0)));
+  } else {
+    // 除窗戶、開關、插座、牆壁上物品外，所有家具與房門皆固定在地板上，不可懸浮
+    item.z = 0;
+  }
+
+  // 牆面專屬物件吸附邏輯 (只能在牆壁上移動，不可飄進房間中央)
+  if (["window", "socket", "switch", "wall_item", "door"].includes(t)) {
+    const cx = item.x + item.w / 2;
+    const cy = item.y + item.d / 2;
+    const distN = Math.abs(cy - 0);
+    const distS = Math.abs(cy - rd);
+    const distW = Math.abs(cx - 0);
+    const distE = Math.abs(cx - rw);
+    const minDist = Math.min(distN, distS, distW, distE);
+
+    const protrudeOut = isOuterWallProtrudingType(t); // 窗戶/開關/插座往牆壁外面突出，不佔房內空間
+    const longSide = Math.max(item.w, item.d);
+    const shortSide = Math.min(item.w, item.d);
+
+    if (minDist === distN || minDist === distS) {
+      // 吸附於北牆 (y=0) 或 南牆 (y=rd)
+      item.w = longSide;
+      item.d = Math.min(shortSide, 24);
+      item.rot = 0;
+      item.x = Math.max(0, Math.min(rw - item.w, Math.round(cx - item.w / 2)));
+      if (minDist === distN) {
+        item.y = protrudeOut ? -item.d : 0;
+        item.wall = "north";
+      } else {
+        item.y = protrudeOut ? rd : rd - item.d;
+        item.wall = "south";
+      }
+    } else {
+      // 吸附於西牆 (x=0) 或 東牆 (x=rw)
+      item.w = Math.min(shortSide, 24);
+      item.d = longSide;
+      item.rot = 0;
+      item.y = Math.max(0, Math.min(rd - item.d, Math.round(cy - item.d / 2)));
+      if (minDist === distW) {
+        item.x = protrudeOut ? -item.w : 0;
+        item.wall = "west";
+      } else {
+        item.x = protrudeOut ? rw : rw - item.w;
+        item.wall = "east";
+      }
+    }
+  } else {
+    // 一般地面家具：檢查是否跨過牆壁穿模
+    const box = getItemAABB(item);
+    const insideRoom = (box.x0 >= 0 && box.x1 <= rw && box.y0 >= 0 && box.y1 <= rd);
+    const completelyOutside = (box.x1 <= -5 || box.x0 >= rw + 5 || box.y1 <= -5 || box.y0 >= rd + 5);
+
+    if (!insideRoom && !completelyOutside) {
+      // 物件壓在牆壁上（超過牆壁）：直接將物品移出房間外備用區（不刪除）
+      const cx = (box.x0 + box.x1) / 2;
+      const cy = (box.y0 + box.y1) / 2;
+      const bw = box.x1 - box.x0;
+      const bd = box.y1 - box.y0;
+      const gap = 25; // 移出牆外 25cm 備用區
+
+      const overL = -box.x0;
+      const overR = box.x1 - rw;
+      const overT = -box.y0;
+      const overB = box.y1 - rd;
+      const maxOver = Math.max(overL, overR, overT, overB);
+
+      if (maxOver === overL) item.x = Math.round(-bw - gap);
+      else if (maxOver === overR) item.x = Math.round(rw + gap);
+      else if (maxOver === overT) item.y = Math.round(-bd - gap);
+      else item.y = Math.round(rd + gap);
+
+      if (showMsg) showToast("📦 物品超過牆壁，已自動移至房間外備用區！");
+    }
+  }
+
+  // 檢查物品與其他物品間是否互相穿模疊在一起
+  for (let i = 0; i < appState.items.length; i++) {
+    const other = appState.items[i];
+    if (other.id === item.id) continue;
+    if (isTwoItemsOverlapping(item, other)) {
+      // 發生重疊：退回最後合法位置與尺寸
+      const backup = lastValidItemMap[item.id];
+      if (backup) {
+        item.x = backup.x;
+        item.y = backup.y;
+        item.z = backup.z;
+        item.w = backup.w;
+        item.d = backup.d;
+        item.h = backup.h;
+        item.rot = backup.rot;
+      }
+      if (showMsg) showToast(`⚠️ 不可與「${other.name}」重疊穿模！`);
+      return false;
+    }
+  }
+
+  // 紀錄此次合法狀態
+  saveValidItemBackup(item);
+  return true;
+}
+
+function saveValidItemBackup(item) {
+  lastValidItemMap[item.id] = {
+    x: item.x, y: item.y, z: item.z || 0,
+    w: item.w, d: item.d, h: item.h || 30, rot: item.rot || 0
+  };
+}
+
+// 為新物件尋找不重疊的初始擺放位置
+function findNonOverlappingSpot(newItem) {
+  if (enforceItemConstraints(newItem, false)) return;
+  const rw = appState.room.width, rd = appState.room.depth;
+  for (let y = 10; y <= rd - newItem.d - 10; y += 25) {
+    for (let x = 10; x <= rw - newItem.w - 10; x += 25) {
+      newItem.x = x; newItem.y = y;
+      if (enforceItemConstraints(newItem, false)) return;
+    }
+  }
+  // 若房間內已滿，直接放置於房間右側外備用區
+  newItem.x = rw + 30;
+  newItem.y = 20;
+  saveValidItemBackup(newItem);
+}
+
+// 人物行走碰撞檢測
 function checkHumanWalkable(nx, ny) {
   const radius = 14;
   const rw = appState.room.width, rd = appState.room.depth;
@@ -60,7 +254,7 @@ function checkHumanWalkable(nx, ny) {
   let supportZ = 0;
   for (let i = 0; i < appState.items.length; i++) {
     const it = appState.items[i];
-    if (it.item_type === "window" || it.item_type === "socket" || it.item_type === "switch") continue;
+    if (isOuterWallProtrudingType(it.item_type)) continue;
     if ((it.z || 0) > 120) continue;
 
     const rad = -(it.rot || 0) * Math.PI / 180;
@@ -78,7 +272,7 @@ function checkHumanWalkable(nx, ny) {
       if (Math.abs(lx) <= halfW && Math.abs(ly) <= halfD) {
         supportZ = Math.max(supportZ, (it.z || 0) + (it.h || 55));
       }
-    } else if (it.item_type === "furniture") {
+    } else if (it.item_type === "furniture" || it.item_type === "wall_item") {
       if (Math.abs(lx) < halfW + radius && Math.abs(ly) < halfD + radius) {
         return { allowed: false, baseZ: appState.human.z || 0 };
       }
@@ -169,6 +363,36 @@ function switchLeftTab(tab) {
   document.querySelectorAll(".tab-content").forEach(c => c.style.display = "none");
   document.getElementById("tab-btn-" + tab).classList.add("active");
   document.getElementById("tab-content-" + tab).style.display = "flex";
+}
+
+// 鎖定既有物品縮放 (2D 與 3D 同步)
+window.toggleLockScaleBtn = function() {
+  appState.room.lock_scale = !appState.room.lock_scale;
+  syncLockScaleUI();
+  renderFullScene();
+};
+
+function syncLockScaleUI() {
+  const locked = !!appState.room.lock_scale;
+  const chk = document.getElementById("lock-scale-chk");
+  if (chk) chk.checked = locked;
+  const b2d = document.getElementById("btn-lock-scale-2d");
+  if (b2d) {
+    b2d.innerText = locked ? "🔒 縮放: 鎖定" : "🔓 縮放: 開";
+    b2d.classList.toggle("active", locked);
+  }
+  const b3d = document.getElementById("btn-lock-scale-3d");
+  if (b3d) {
+    b3d.innerText = locked ? "🔒 縮放: 鎖定" : "🔓 縮放: 開";
+    b3d.classList.toggle("active", locked);
+  }
+  const bScaleGizmo = document.getElementById("btn-3d-scale");
+  if (bScaleGizmo) {
+    bScaleGizmo.style.opacity = locked ? "0.4" : "1";
+  }
+  if (locked && gizmoMode === "scale") {
+    window.set3DGizmoMode("translate");
+  }
 }
 
 function renderCategoryUI() {
@@ -289,10 +513,19 @@ function initFabric() {
     preserveObjectStacking: true
   });
 
+  // 初始化所有預設物件的合法備份快照
+  appState.items.forEach(it => saveValidItemBackup(it));
+
   bindDpadBtn("dpad-up", 0, 1);
   bindDpadBtn("dpad-down", 0, -1);
   bindDpadBtn("dpad-left", -1, 0);
   bindDpadBtn("dpad-right", 1, 0);
+
+  document.getElementById("lock-scale-chk").addEventListener("change", e => {
+    appState.room.lock_scale = e.target.checked;
+    syncLockScaleUI();
+    renderFullScene();
+  });
 
   canvas.on('mouse:wheel', function(opt) {
     const delta = opt.e.deltaY;
@@ -375,6 +608,7 @@ function initFabric() {
   renderCategoryUI();
   initRoomFormValues();
   initHumanFormValues();
+  syncLockScaleUI();
   renderVoidListUI();
   renderFullScene();
   zoomToFit();
@@ -395,10 +629,10 @@ function renderFullScene() {
   }));
 
   canvas.add(new fabric.Text(`◀ 房間寬 ${rw} cm ▶`, {
-    left: rw / 2, top: -20, fontSize: 13, fill: '#94A3B8', originX: 'center', selectable: false, evented: false
+    left: rw / 2, top: -24, fontSize: 13, fill: '#94A3B8', originX: 'center', selectable: false, evented: false
   }));
   canvas.add(new fabric.Text(`◀ 房間深 ${rd} cm ▶`, {
-    left: -20, top: rd / 2, fontSize: 13, fill: '#94A3B8', originX: 'center', angle: -90, selectable: false, evented: false
+    left: -24, top: rd / 2, fontSize: 13, fill: '#94A3B8', originX: 'center', angle: -90, selectable: false, evented: false
   }));
 
   const canEditGround = !!appState.room.editable && !forcePanMode;
@@ -513,15 +747,18 @@ function createFabricItem(item) {
   });
   subElements.push(text);
 
+  const lockS = !!appState.room.lock_scale;
   const group = new fabric.Group(subElements, {
     left: item.x + item.w / 2, top: item.y + item.d / 2,
     angle: item.rot || 0, originX: 'center', originY: 'center',
+    lockScalingX: lockS, lockScalingY: lockS,
     selectable: !forcePanMode, evented: !forcePanMode, itemId: item.id
   });
 
   group.setControlsVisibility({
-    mt: true, mb: true, ml: true, mr: true,
-    tl: true, tr: true, bl: true, br: true, mtr: true
+    mt: !lockS, mb: !lockS, ml: !lockS, mr: !lockS,
+    tl: !lockS, tr: !lockS, bl: !lockS, br: !lockS,
+    mtr: true
   });
 
   if (item.texture && item.item_type !== "window") {
@@ -689,13 +926,13 @@ function onObjectLiveMoving(e) {
     }
 
     const baseRect = target.item(0);
-    const newW = Math.max(4, Math.round(baseRect.width * Math.abs(target.scaleX)));
-    const newD = Math.max(4, Math.round(baseRect.height * Math.abs(target.scaleY)));
-    item.w = newW;
-    item.d = newD;
+    if (!appState.room.lock_scale) {
+      item.w = Math.max(4, Math.round(baseRect.width * Math.abs(target.scaleX)));
+      item.d = Math.max(4, Math.round(baseRect.height * Math.abs(target.scaleY)));
+    }
     item.rot = Math.round((target.angle % 360 + 360) % 360);
-    item.x = Math.round(target.left - newW / 2);
-    item.y = Math.round(target.top - newD / 2);
+    item.x = Math.round(target.left - item.w / 2);
+    item.y = Math.round(target.top - item.d / 2);
     updateLeftItemPanel();
   } else if (target.voidId) {
     const v = appState.voids.find(x => x.id === target.voidId);
@@ -720,6 +957,14 @@ function onObjectModifiedComplete(e) {
   trashEl.classList.remove("show", "hover");
   isOverTrash = false;
   onObjectLiveMoving(e);
+
+  if (e.target && e.target.itemId) {
+    const item = appState.items.find(i => i.id === e.target.itemId);
+    if (item) {
+      enforceItemConstraints(item, true);
+      updateLeftItemPanel();
+    }
+  }
   renderFullScene();
 }
 
@@ -738,17 +983,19 @@ function updateLeftItemPanel() {
   document.getElementById("prop-editor").style.display = "block";
 
   const typeNames = {
-    furniture: "🛋️ 家具 / 床",
-    door: "🚪 房門 (支援開向翻轉)",
-    window: "🪟 窗戶 (3D富士山窗景)",
-    socket: "🔌 牆壁插座 (3D擬真)",
-    switch: "💡 牆壁開關 (3D擬真)"
+    furniture: "🛋️ 家具 / 床 (貼地)",
+    wall_item: "🖼️ 牆壁上物品 (貼牆可調Z)",
+    door: "🚪 房門 (貼牆貼地)",
+    window: "🪟 窗戶 (貼牆外突)",
+    socket: "🔌 插座 (貼牆外突)",
+    switch: "💡 開關 (貼牆外突)"
   };
-  document.getElementById("prop-type-badge").innerText = typeNames[item.item_type || "furniture"];
+  const t = item.item_type || "furniture";
+  document.getElementById("prop-type-badge").innerText = typeNames[t] || typeNames.furniture;
 
   setInputValueSafe("prop-name", item.name);
   setInputValueSafe("prop-category", item.category || appState.categories[0]);
-  setInputValueSafe("prop-type", item.item_type || "furniture");
+  setInputValueSafe("prop-type", t);
   setInputValueSafe("prop-w", Math.round(item.w));
   setInputValueSafe("prop-d", Math.round(item.d));
   setInputValueSafe("prop-h", item.h || 30);
@@ -760,33 +1007,25 @@ function updateLeftItemPanel() {
   document.getElementById("prop-rot-val").innerText = (item.rot || 0) + "°";
   setInputValueSafe("prop-color", item.color);
 
-  document.getElementById("door-swing-group").style.display = (item.item_type === "door") ? "flex" : "none";
-  document.getElementById("scenery-upload-group").style.display = (item.item_type === "window") ? "flex" : "none";
+  // 鎖定縮放時，寬深高欄位設為唯讀
+  const lockS = !!appState.room.lock_scale;
+  document.getElementById("prop-w").disabled = lockS;
+  document.getElementById("prop-d").disabled = lockS;
+  document.getElementById("prop-h").disabled = lockS;
+
+  // 只有窗戶/開關/插座/牆壁上物品可調整 Z 軸離地高度，其餘隱藏或鎖定 Z=0
+  const canZ = isZAdjustableWallType(t);
+  document.getElementById("prop-z-row").style.display = canZ ? "flex" : "none";
+  document.getElementById("prop-z-hint").style.display = canZ ? "inline" : "none";
+
+  document.getElementById("door-swing-group").style.display = (t === "door") ? "flex" : "none";
+  document.getElementById("scenery-upload-group").style.display = (t === "window") ? "flex" : "none";
 }
 
 function updateSingleItemVisual(item) {
-  if (item.item_type === "door") {
-    renderFullScene();
-    return;
-  }
-  const group = canvas ? canvas.getObjects().find(o => o.itemId === item.id) : null;
-  if (group) {
-    const rect = group.item(0);
-    const txt = group.item(group.size() - 1);
-    rect.set({ width: item.w, height: item.d, fill: item.color });
-    const fontSize = Math.max(9, Math.min(12, Math.min(item.w, item.d) * 0.45));
-    txt.set({ text: `${item.name}\n${Math.round(item.w)}×${Math.round(item.d)}`, fontSize: fontSize });
-    group.set({
-      width: item.w, height: item.d,
-      left: item.x + item.w / 2,
-      top: item.y + item.d / 2,
-      angle: item.rot || 0
-    });
-    group.setCoords();
-    canvas.requestRenderAll();
-  }
-  renderRightPanel();
-  if ((currentMode === "3D" || currentMode === "FPV") && renderer) updateThreeScene();
+  enforceItemConstraints(item, true);
+  updateLeftItemPanel();
+  renderFullScene();
 }
 
 ["prop-name", "prop-category", "prop-type", "prop-w", "prop-d", "prop-h", "prop-x", "prop-y", "prop-z", "prop-rot", "prop-color"].forEach(id => {
@@ -802,6 +1041,8 @@ function updateSingleItemVisual(item) {
     } else if (id === "prop-type") {
       item.item_type = rawVal;
       if (rawVal === "window" && !item.scenery) item.scenery = appState.default_fuji;
+      if (!isZAdjustableWallType(rawVal)) item.z = 0;
+      enforceItemConstraints(item, true);
       updateLeftItemPanel();
       renderFullScene();
       return;
@@ -811,12 +1052,12 @@ function updateSingleItemVisual(item) {
       if (rawVal === "" || rawVal === "-") return;
       const num = parseFloat(rawVal);
       if (isNaN(num)) return;
-      if (id === "prop-w") item.w = Math.max(1, num);
-      if (id === "prop-d") item.d = Math.max(1, num);
-      if (id === "prop-h") item.h = Math.max(1, num);
+      if (id === "prop-w" && !appState.room.lock_scale) item.w = Math.max(1, num);
+      if (id === "prop-d" && !appState.room.lock_scale) item.d = Math.max(1, num);
+      if (id === "prop-h" && !appState.room.lock_scale) item.h = Math.max(1, Math.min(appState.room.height, num));
       if (id === "prop-x") item.x = num;
       if (id === "prop-y") item.y = num;
-      if (id === "prop-z") item.z = num;
+      if (id === "prop-z" && isZAdjustableWallType(item.item_type)) item.z = Math.max(0, num);
       if (id === "prop-rot") {
         item.rot = ((num % 360) + 360) % 360;
         document.getElementById("prop-rot-slider").value = item.rot;
@@ -886,7 +1127,6 @@ document.getElementById("btn-clear-texture").addEventListener("click", () => {
   renderFullScene();
 });
 
-// 切換新增物件種類下拉選單時，自動帶入建議尺寸（需按確認按鈕才會新增）
 window.onNewObjTypeChange = function() {
   const t = document.getElementById("new-obj-type").value;
   const cat = document.getElementById("new-obj-category").value;
@@ -895,6 +1135,9 @@ window.onNewObjTypeChange = function() {
   const dEl = document.getElementById("new-obj-d");
   const hEl = document.getElementById("new-obj-h");
   const zEl = document.getElementById("new-obj-z");
+  const zRow = document.getElementById("new-obj-z-row");
+
+  zRow.style.display = isZAdjustableWallType(t) ? "flex" : "none";
 
   if (t === "window") {
     nameEl.value = "窗戶"; wEl.value = 120; dEl.value = 12; hEl.value = 130; zEl.value = 85;
@@ -902,6 +1145,8 @@ window.onNewObjTypeChange = function() {
     nameEl.value = "插座"; wEl.value = 22; dEl.value = 12; hEl.value = 14; zEl.value = 30;
   } else if (t === "switch") {
     nameEl.value = "開關"; wEl.value = 22; dEl.value = 12; hEl.value = 14; zEl.value = 110;
+  } else if (t === "wall_item") {
+    nameEl.value = "壁掛冷氣/掛畫"; wEl.value = 85; dEl.value = 18; hEl.value = 30; zEl.value = 210;
   } else if (t === "door") {
     nameEl.value = "房門"; wEl.value = 90; dEl.value = 14; hEl.value = 210; zEl.value = 0;
   } else {
@@ -919,16 +1164,16 @@ window.confirmAddNewObject = function() {
   const name = document.getElementById("new-obj-name").value.trim() || "新物件";
   const w = Math.max(4, parseFloat(document.getElementById("new-obj-w").value) || 60);
   const d = Math.max(4, parseFloat(document.getElementById("new-obj-d").value) || 50);
-  const h = Math.max(4, parseFloat(document.getElementById("new-obj-h").value) || 30);
-  const z = parseFloat(document.getElementById("new-obj-z").value) || 0;
+  const h = Math.max(4, Math.min(appState.room.height, parseFloat(document.getElementById("new-obj-h").value) || 30));
+  const z = isZAdjustableWallType(type) ? Math.max(0, parseFloat(document.getElementById("new-obj-z").value) || 0) : 0;
 
-  const colorMap = { window: "#F59E0B", socket: "#F97316", switch: "#0EA5E9", door: "#8B5A2B", furniture: chosenCat === "床" ? "#FAD785" : "#38BDF8" };
+  const colorMap = { window: "#F59E0B", socket: "#F97316", switch: "#0EA5E9", wall_item: "#10B981", door: "#8B5A2B", furniture: chosenCat === "床" ? "#FAD785" : "#38BDF8" };
   const newItem = {
     id: "item_" + Date.now(),
     name: name,
     category: chosenCat,
     item_type: type,
-    x: 120, y: 120, z: z,
+    x: 130, y: ["window", "socket", "switch", "wall_item", "door"].includes(type) ? appState.room.depth : 210, z: z,
     w: w, d: d, h: h, rot: 0,
     color: colorMap[type] || "#38BDF8",
     texture: "",
@@ -936,13 +1181,13 @@ window.confirmAddNewObject = function() {
     flip_x: false, flip_y: false
   };
   expandedCategories.add(chosenCat);
+  findNonOverlappingSpot(newItem);
   appState.items.push(newItem);
   activeId = newItem.id;
   renderFullScene();
   selectItemById(newItem.id);
 };
 
-// 刪除牆壁與天花板材質並立即同步回主畫面
 window.clearWallTexture = function() {
   appState.room.wall_texture = "";
   document.getElementById("wall-texture-file").value = "";
@@ -964,6 +1209,7 @@ window.deleteSelectedActive = function() {
 function deleteItemById(id, evt) {
   if (evt) evt.stopPropagation();
   appState.items = appState.items.filter(i => i.id !== id);
+  delete lastValidItemMap[id];
   if (activeId === id) {
     activeId = null;
     if (transformControl) transformControl.detach();
@@ -982,7 +1228,8 @@ document.getElementById("btn-duplicate").addEventListener("click", () => {
   const copy = JSON.parse(JSON.stringify(item));
   copy.id = "item_" + Date.now();
   copy.name = item.name + "(複本)";
-  copy.x += 20; copy.y += 20;
+  copy.x += 25; copy.y += 25;
+  findNonOverlappingSpot(copy);
   appState.items.push(copy);
   activeId = copy.id;
   renderFullScene();
@@ -1056,6 +1303,7 @@ function initRoomFormValues() {
   setInputValueSafe("room-ceil-color", appState.room.ceiling_color || "#FFFFFF");
 
   document.getElementById("compass-show").checked = appState.compass.show;
+  document.getElementById("compass-auto-center").checked = !!appState.compass.auto_center;
   setInputValueSafe("compass-x", appState.compass.x);
   setInputValueSafe("compass-y", appState.compass.y);
   setInputValueSafe("compass-rot", appState.compass.rotation || 0);
@@ -1068,6 +1316,8 @@ function initRoomFormValues() {
 
 function syncRoomFromInputs(e) {
   if (e && (e.target.value === "" || e.target.value === "-")) return;
+  const targetId = e ? e.target.id : "";
+
   appState.room.width = parseFloat(document.getElementById("room-w").value) || 400;
   appState.room.depth = parseFloat(document.getElementById("room-d").value) || 300;
   appState.room.height = parseFloat(document.getElementById("room-h").value) || 280;
@@ -1077,8 +1327,21 @@ function syncRoomFromInputs(e) {
   appState.room.ceiling_color = document.getElementById("room-ceil-color").value;
 
   appState.compass.show = document.getElementById("compass-show").checked;
-  appState.compass.x = parseFloat(document.getElementById("compass-x").value) || 200;
-  appState.compass.y = parseFloat(document.getElementById("compass-y").value) || 150;
+  appState.compass.auto_center = document.getElementById("compass-auto-center").checked;
+
+  // 若使用者手動改了 compass-x 或 compass-y，取消自動置中；否則只要地基改變或勾選自動置中，自動設為 (width/2, depth/2)
+  if (targetId === "compass-x" || targetId === "compass-y") {
+    appState.compass.auto_center = false;
+    document.getElementById("compass-auto-center").checked = false;
+    appState.compass.x = parseFloat(document.getElementById("compass-x").value) || 200;
+    appState.compass.y = parseFloat(document.getElementById("compass-y").value) || 150;
+  } else if (appState.compass.auto_center || targetId === "room-w" || targetId === "room-d") {
+    appState.compass.x = Math.round(appState.room.width / 2);
+    appState.compass.y = Math.round(appState.room.depth / 2);
+    setInputValueSafe("compass-x", appState.compass.x);
+    setInputValueSafe("compass-y", appState.compass.y);
+  }
+
   appState.compass.rotation = parseFloat(document.getElementById("compass-rot").value) || 0;
   setInputValueSafe("compass-rot-slider", appState.compass.rotation);
   document.getElementById("compass-rot-val").innerText = appState.compass.rotation + "°";
@@ -1086,6 +1349,8 @@ function syncRoomFromInputs(e) {
   appState.compass.show_feixing = document.getElementById("feixing-show").checked;
   appState.compass.feixing_year = parseInt(document.getElementById("feixing-year").value) || 2026;
 
+  // 地基改變時，重新校正牆上物品吸附位置與高度防穿模
+  appState.items.forEach(it => enforceItemConstraints(it, false));
   renderFullScene();
 }
 
@@ -1120,9 +1385,40 @@ document.getElementById("ceil-texture-file").addEventListener("change", function
   reader.readAsDataURL(file);
 });
 
+// 第一人稱「僅水平轉動」切換
+window.toggleLockHorizFPV = function() {
+  appState.human.lock_horizontal = !appState.human.lock_horizontal;
+  if (appState.human.lock_horizontal) {
+    appState.human.pitch = 0;
+  }
+  initHumanFormValues();
+  if (currentMode === "FPV") syncFPVCamera();
+};
+
+document.getElementById("human-lock-horiz").addEventListener("change", e => {
+  appState.human.lock_horizontal = e.target.checked;
+  if (appState.human.lock_horizontal) {
+    appState.human.pitch = 0;
+  }
+  initHumanFormValues();
+  if (currentMode === "FPV") syncFPVCamera();
+});
+
 function initHumanFormValues() {
   const h = appState.human;
   const eyeH = getHumanEyeHeight();
+  const lockH = !!h.lock_horizontal;
+
+  document.getElementById("human-lock-horiz").checked = lockH;
+  const hudLockBtn = document.getElementById("hud-btn-lock-h");
+  if (hudLockBtn) {
+    hudLockBtn.innerText = lockH ? "🔒 僅水平" : "🔓 自由視角";
+    hudLockBtn.classList.toggle("active", lockH);
+  }
+  document.getElementById("human-pitch-slider").disabled = lockH;
+  document.getElementById("human-pitch").disabled = lockH;
+  document.getElementById("hud-pitch-slider").disabled = lockH;
+
   setInputValueSafe("human-height", h.height || 178);
   setInputValueSafe("human-x", Math.round(h.x));
   setInputValueSafe("human-y", Math.round(h.y));
@@ -1158,7 +1454,7 @@ function initHumanFormValues() {
     if (id === "human-x") tryMoveHumanTo(val, appState.human.y, true);
     if (id === "human-y") tryMoveHumanTo(appState.human.x, val, true);
     if (id === "human-rot") appState.human.rot = ((val % 360) + 360) % 360;
-    if (id === "human-pitch") appState.human.pitch = Math.max(-85, Math.min(85, val));
+    if (id === "human-pitch" && !appState.human.lock_horizontal) appState.human.pitch = Math.max(-85, Math.min(85, val));
     initHumanFormValues();
     renderFullScene();
     if (currentMode === "FPV") syncFPVCamera();
@@ -1173,12 +1469,14 @@ document.getElementById("human-rot-slider").addEventListener("input", e => {
 });
 
 document.getElementById("human-pitch-slider").addEventListener("input", e => {
+  if (appState.human.lock_horizontal) return;
   appState.human.pitch = parseFloat(e.target.value) || 0;
   initHumanFormValues();
   if (currentMode === "FPV") syncFPVCamera();
 });
 
 document.getElementById("hud-pitch-slider").addEventListener("input", e => {
+  if (appState.human.lock_horizontal) return;
   appState.human.pitch = parseFloat(e.target.value) || 0;
   initHumanFormValues();
   if (currentMode === "FPV") syncFPVCamera();
@@ -1186,14 +1484,16 @@ document.getElementById("hud-pitch-slider").addEventListener("input", e => {
 
 window.setHumanPosture = function(p) {
   appState.human.posture = p;
-  if (p === "lie") {
-    appState.human.pitch = 35;
-    appState.room.show_ceiling = true;
-    document.getElementById("room-show-ceiling").checked = true;
-  } else if (p === "sit") {
-    appState.human.pitch = -5;
-  } else {
-    appState.human.pitch = 0;
+  if (!appState.human.lock_horizontal) {
+    if (p === "lie") {
+      appState.human.pitch = 35;
+      appState.room.show_ceiling = true;
+      document.getElementById("room-show-ceiling").checked = true;
+    } else if (p === "sit") {
+      appState.human.pitch = -5;
+    } else {
+      appState.human.pitch = 0;
+    }
   }
   const check = checkHumanWalkable(appState.human.x, appState.human.y);
   appState.human.z = check.baseZ;
@@ -1221,6 +1521,7 @@ function renderRightPanel() {
 
   const badgeMap = {
     furniture: { text: "家具", cls: "" },
+    wall_item: { text: "🖼️ 牆物", cls: "win" },
     door: { text: "🚪 門", cls: "door" },
     window: { text: "🪟 窗", cls: "win" },
     socket: { text: "🔌 插座", cls: "win" },
@@ -1379,20 +1680,22 @@ document.getElementById("btn-pan-toggle").addEventListener("click", function() {
 });
 
 document.getElementById("btn-save-local").addEventListener("click", () => {
-  localStorage.setItem("room_planner_v6", JSON.stringify(appState));
+  localStorage.setItem("room_planner_v7", JSON.stringify(appState));
   alert("✅ 已成功儲存於 App 本地記憶中！");
 });
 
 document.getElementById("btn-load-local").addEventListener("click", () => {
-  const saved = localStorage.getItem("room_planner_v6") || localStorage.getItem("room_planner_v5");
+  const saved = localStorage.getItem("room_planner_v7") || localStorage.getItem("room_planner_v6");
   if (saved) {
     appState = JSON.parse(saved);
-    if (!appState.categories) appState.categories = ["床", "大型家具", "收納櫃體", "門窗建材", "機電開關"];
+    if (!appState.categories) appState.categories = ["床", "大型家具", "收納櫃體", "門窗建材", "機電開關", "牆面裝飾"];
     if (!appState.categories.includes("床")) appState.categories.unshift("床");
-    if (!appState.human) appState.human = { x: 230, y: 230, z: 0, height: 178, rot: 0, pitch: 0, posture: "stand" };
+    if (!appState.human) appState.human = { x: 230, y: 230, z: 0, height: 178, rot: 0, pitch: 0, posture: "stand", lock_horizontal: false };
+    appState.items.forEach(it => saveValidItemBackup(it));
     renderCategoryUI();
     initRoomFormValues();
     initHumanFormValues();
+    syncLockScaleUI();
     renderVoidListUI();
     renderFullScene();
     zoomToFit();
@@ -1419,12 +1722,14 @@ document.getElementById("file-import").addEventListener("change", function(e) {
   reader.onload = function(evt) {
     try {
       appState = JSON.parse(evt.target.result);
-      if (!appState.categories) appState.categories = ["床", "大型家具", "收納櫃體", "門窗建材", "機電開關"];
+      if (!appState.categories) appState.categories = ["床", "大型家具", "收納櫃體", "門窗建材", "機電開關", "牆面裝飾"];
       if (!appState.categories.includes("床")) appState.categories.unshift("床");
-      if (!appState.human) appState.human = { x: 230, y: 230, z: 0, height: 178, rot: 0, pitch: 0, posture: "stand" };
+      if (!appState.human) appState.human = { x: 230, y: 230, z: 0, height: 178, rot: 0, pitch: 0, posture: "stand", lock_horizontal: false };
+      appState.items.forEach(it => saveValidItemBackup(it));
       renderCategoryUI();
       initRoomFormValues();
       initHumanFormValues();
+      syncLockScaleUI();
       renderVoidListUI();
       renderFullScene();
       zoomToFit();
@@ -1439,16 +1744,17 @@ document.getElementById("file-import").addEventListener("change", function(e) {
 document.getElementById("btn-reset-default").addEventListener("click", () => {
   if (confirm("確定要重置回附圖原始預設配置嗎？")) {
     appState = JSON.parse(JSON.stringify(INITIAL_CONFIG));
+    appState.items.forEach(it => saveValidItemBackup(it));
     renderCategoryUI();
     initRoomFormValues();
     initHumanFormValues();
+    syncLockScaleUI();
     renderVoidListUI();
     renderFullScene();
     zoomToFit();
   }
 });
 
-// 左右面板寬度拖曳改變大小 + 手機鍵盤彈出時自動捲動避開遮擋
 function initPanelResizers() {
   const leftPanel = document.getElementById("left-panel");
   const rightPanel = document.getElementById("right-panel");
