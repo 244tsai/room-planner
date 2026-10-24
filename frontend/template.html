@@ -54,7 +54,7 @@
       </div>
 
       <div id="no-selection" style="color: #94A3B8; font-size: 11px; margin: 4px 0; text-align: center; line-height: 1.4; background: #1F232B; padding: 8px; border-radius: 6px; border: 1px dashed #334155;">
-        👈 <b>點選畫面或列表中的物件進行編輯</b><br>💡 物件不可重疊穿模；拉超過牆壁會自動移至房外備用區！
+        👈 <b>點選畫面或列表中的物件進行編輯</b><br>💡 碰到牆壁或家具會自動貼齊卡住；拉超過牆壁 3/4 才移至房外備用區！
       </div>
 
       <div id="prop-editor" style="display: none;">
@@ -233,7 +233,7 @@
     <div class="tab-content" id="tab-content-human" style="display: none;">
       <div class="panel-title" style="color:#C084FC;">🚶 人物身高與第一人稱視角</div>
       <div style="font-size:11px; color:#94A3B8; line-height:1.4; background:#1F232B; padding:8px; border-radius:6px;">
-        💡 <b>防誤觸保護</b>：身高僅限此處編輯。<br>
+        💡 <b>真實人眼視角</b>：左右 110°、上視角 60°、下視角 75°。<br>
         💡 <b>點擊地面移動</b>：在 3D 或第一人稱視角中<b>點擊地板或床面</b>，人物會以自然擺手擺腿步伐走過去！
       </div>
 
@@ -272,9 +272,9 @@
       </div>
 
       <div class="field-group" id="human-pitch-group">
-        <label><span>📐 抬頭/低頭仰角 (-85°～+85°)</span><span id="human-pitch-val" style="color:#38BDF8;">0°</span></label>
-        <input type="range" id="human-pitch-slider" min="-85" max="85" value="0" style="width:100%;">
-        <input type="number" id="human-pitch" min="-85" max="85">
+        <label><span>📐 抬頭/低頭仰角 (-75°～+60°)</span><span id="human-pitch-val" style="color:#38BDF8;">0°</span></label>
+        <input type="range" id="human-pitch-slider" min="-75" max="60" value="0" style="width:100%;">
+        <input type="number" id="human-pitch" min="-75" max="60">
       </div>
 
       <button onclick="enterHumanFPV()" class="purple" style="width:100%; padding:9px; font-size:12px; margin-top:4px;">
@@ -319,7 +319,7 @@
         <button id="btn-mode-fpv" class="purple">👁️ 第一人稱視角</button>
       </div>
       <div class="hint-text" style="font-size: 11px; color: #94A3B8;">
-        💡 物品不可穿模重疊 | 超過牆壁自動移至房外備用區 | 窗戶/開關/插座往牆外突出
+        💡 碰到牆壁或家具自動貼齊卡住 | 超過牆壁 3/4 自動移至房外備用區
       </div>
     </div>
 
@@ -342,37 +342,52 @@
       <button onclick="deleteSelectedActive()" class="danger">🗑️ 刪除</button>
     </div>
 
+    <!-- 全新袖珍可拖曳、可縮放、可折疊的第一人稱控制框 (HUD) -->
     <div class="fpv-hud" id="fpv-hud">
-      <div style="display:flex; justify-content:space-between; width:100%; align-items:center; gap:6px;">
-        <span id="fpv-status-text" style="font-size:11px; font-weight:bold; color:#DDD6FE;">👁️ 第一人稱視角 (點地面走動)</span>
-        <button onclick="exitHumanFPV()" class="danger" style="padding:3px 8px; font-size:11px;">退出視角</button>
-      </div>
-      <div style="display:flex; gap:5px; width:100%; align-items:center;">
-        <button id="hud-btn-stand" style="flex:1;" onclick="setHumanPosture('stand')">🧍 站立</button>
-        <button id="hud-btn-sit" style="flex:1;" onclick="setHumanPosture('sit')">🪑 坐姿</button>
-        <button id="hud-btn-lie" style="flex:1;" onclick="setHumanPosture('lie')">🛏️ 躺姿</button>
-        <button id="hud-btn-lock-h" style="flex:1.2;" onclick="toggleLockHorizFPV()">🔓 自由視角</button>
-      </div>
-      <div style="display:flex; gap:10px; align-items:center; width:100%; justify-content:center;">
-        <div class="dpad-grid">
-          <div></div>
-          <button id="dpad-up">▲</button>
-          <div></div>
-          <button id="dpad-left">◀</button>
-          <button onclick="placeHumanOnBed('sit')" title="移至床上" style="font-size:12px;background:#7C3AED;">🛏️</button>
-          <button id="dpad-right">▶</button>
-          <div></div>
-          <button id="dpad-down">▼</button>
-          <div></div>
-        </div>
-        <div style="display:flex; flex-direction:column; gap:4px; flex:1; max-width:150px;">
-          <label style="font-size:10px; color:#CBD5E1; display:flex; justify-content:space-between;">
-            <span>視角仰角</span><span id="hud-pitch-lbl" style="color:#38BDF8;font-weight:bold;">0°</span>
-          </label>
-          <input type="range" id="hud-pitch-slider" min="-85" max="85" value="0" style="width:100%;">
-          <div id="hud-eye-height-lbl" style="font-size:10px; color:#34D399; text-align:center;">目前眼高: 165 cm</div>
+      <div class="fpv-hud-header" id="fpv-hud-drag">
+        <span class="fpv-hud-title">✥ 👁️ 視角控制 (按此拖曳)</span>
+        <div style="display:flex; gap:3px;">
+          <button onclick="toggleMinimizeFPVHud()" id="btn-fpv-min" style="padding:1px 5px; font-size:10px;" title="折疊/展開">—</button>
+          <button onclick="exitHumanFPV()" class="danger" style="padding:1px 5px; font-size:10px;" title="退出第一人稱">✕</button>
         </div>
       </div>
+
+      <div class="fpv-hud-body">
+        <!-- 姿勢與水平鎖定精簡列 -->
+        <div class="fpv-mini-row">
+          <button id="hud-btn-stand" onclick="setHumanPosture('stand')">🧍站</button>
+          <button id="hud-btn-sit" onclick="setHumanPosture('sit')">🪑坐</button>
+          <button id="hud-btn-lie" onclick="setHumanPosture('lie')">🛏️躺</button>
+          <button id="hud-btn-lock-h" onclick="toggleLockHorizFPV()">🔓自由</button>
+        </div>
+
+        <!-- 十字方向鍵 + 視角仰角滑桿 -->
+        <div style="display:flex; gap:6px; align-items:center; justify-content:space-between;">
+          <div class="dpad-compact">
+            <div></div>
+            <button id="dpad-up">▲</button>
+            <div></div>
+            <button id="dpad-left">◀</button>
+            <button onclick="placeHumanOnBed('sit')" title="上床" style="font-size:10px;background:#7C3AED;">🛏️</button>
+            <button id="dpad-right">▶</button>
+            <div></div>
+            <button id="dpad-down">▼</button>
+            <div></div>
+          </div>
+
+          <div style="display:flex; flex-direction:column; gap:3px; flex:1; min-width:85px;">
+            <label style="font-size:9px; color:#CBD5E1; display:flex; justify-content:space-between;">
+              <span>仰俯角</span><span id="hud-pitch-lbl" style="color:#38BDF8;font-weight:bold;">0°</span>
+            </label>
+            <input type="range" id="hud-pitch-slider" min="-75" max="60" value="0" style="width:100%;">
+            <div id="hud-eye-height-lbl" style="font-size:9px; color:#34D399; white-space:nowrap;">眼高: 165cm</div>
+            <div style="font-size:8px; color:#94A3B8; white-space:nowrap;">視野:110°(上60/下75)</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 右下角無段縮放拉柄 -->
+      <div class="fpv-resizer" id="fpv-hud-resizer" title="按住拖曳可縮放控制框大小">◢</div>
     </div>
 
     <div class="trash-dropzone" id="trash-dropzone">
