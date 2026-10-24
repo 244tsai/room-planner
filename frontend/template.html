@@ -15,7 +15,6 @@
 
     <!-- 標籤 1：物件新增(填好按新增) + 物件編輯 -->
     <div class="tab-content" id="tab-content-item">
-      <!-- 鎖定既有物品縮放開關 (2D與3D同步) -->
       <div style="background:#1E293B; border:1px solid #3B82F6; padding:7px 8px; border-radius:6px; display:flex; align-items:center; justify-content:space-between; gap:6px;">
         <span style="font-size:11px; font-weight:600; color:#93C5FD;">🔒 鎖定既有物品縮放 (僅移動/旋轉)</span>
         <input type="checkbox" id="lock-scale-chk" style="width:16px; height:16px; cursor:pointer; flex-shrink:0;">
@@ -31,6 +30,7 @@
           <label>2. 選擇模型種類</label>
           <select id="new-obj-type" onchange="onNewObjTypeChange()">
             <option value="furniture">🛋️ 一般家具 / 床 (貼地)</option>
+            <option value="chair">🪑 椅子 (可設坐墊高度供人物坐)</option>
             <option value="wall_item">🖼️ 牆壁上物品 (貼牆可調Z軸)</option>
             <option value="door">🚪 房門 (貼牆貼地)</option>
             <option value="window">🪟 窗戶 (貼牆外突可調Z軸)</option>
@@ -44,7 +44,8 @@
           <div class="field-row" style="margin-top:3px;">
             <div><span>寬 W</span><input type="number" id="new-obj-w" value="60"></div>
             <div><span>深 D</span><input type="number" id="new-obj-d" value="50"></div>
-            <div><span>高 H</span><input type="number" id="new-obj-h" value="30"></div>
+            <div><span>總高 H</span><input type="number" id="new-obj-h" value="30"></div>
+            <div id="new-obj-seath-row" style="display:none;"><span style="color:#38BDF8;font-weight:bold;">坐墊高</span><input type="number" id="new-obj-seath" value="45"></div>
             <div id="new-obj-z-row" style="display:none;"><span style="color:#F59E0B;">離地Z</span><input type="number" id="new-obj-z" value="0"></div>
           </div>
         </div>
@@ -75,6 +76,7 @@
           <label>物件模型種類</label>
           <select id="prop-type">
             <option value="furniture">🛋️ 一般家具 / 床 (貼地)</option>
+            <option value="chair">🪑 椅子 (可設坐墊高度)</option>
             <option value="wall_item">🖼️ 牆壁上物品 (貼牆可調Z軸)</option>
             <option value="door">🚪 房門 (貼牆貼地)</option>
             <option value="window">🪟 窗戶 (貼牆外突可調Z軸)</option>
@@ -84,11 +86,12 @@
         </div>
 
         <div class="field-group">
-          <label>尺寸：寬(W) / 深(D) / 高(H) cm</label>
+          <label>尺寸：寬(W) / 深(D) / 總高(H) cm</label>
           <div class="field-row">
             <div><span style="font-size:11px;color:#94A3B8;">寬度 W</span><input type="number" id="prop-w"></div>
             <div><span style="font-size:11px;color:#94A3B8;">深度 D</span><input type="number" id="prop-d"></div>
-            <div><span style="font-size:11px;color:#94A3B8;">高度 H</span><input type="number" id="prop-h" placeholder="30"></div>
+            <div><span style="font-size:11px;color:#94A3B8;">總高 H</span><input type="number" id="prop-h" placeholder="30"></div>
+            <div id="prop-seath-row" style="display:none;"><span style="font-size:11px;color:#38BDF8;font-weight:bold;">坐墊高</span><input type="number" id="prop-seath" placeholder="45"></div>
           </div>
         </div>
 
@@ -232,15 +235,21 @@
     <!-- 標籤 3：人物模型與第一人稱視角設定 -->
     <div class="tab-content" id="tab-content-human" style="display: none;">
       <div class="panel-title" style="color:#C084FC;">🚶 人物身高與第一人稱視角</div>
-      <div style="font-size:11px; color:#94A3B8; line-height:1.4; background:#1F232B; padding:8px; border-radius:6px;">
-        💡 <b>真實人眼視角</b>：左右 110°、上視角 60°、下視角 75°。<br>
-        💡 <b>點擊地面移動</b>：在 3D 或第一人稱視角中<b>點擊地板或床面</b>，人物會以自然擺手擺腿步伐走過去！
-      </div>
 
       <!-- 僅水平轉動開關 -->
       <div style="background:#1E293B; border:1px solid #A855F7; padding:7px 8px; border-radius:6px; display:flex; align-items:center; justify-content:space-between; gap:6px;">
         <span style="font-size:11px; font-weight:600; color:#E9D5FF;">🔒 僅水平轉動 (鎖定抬頭低頭防晃)</span>
         <input type="checkbox" id="human-lock-horiz" style="width:16px; height:16px; cursor:pointer; flex-shrink:0;">
+      </div>
+
+      <!-- 可自由輸入的第一人稱視野角度設定 (預設左右100度、上50度、下65度) -->
+      <div class="field-group" style="background:#1F232B; border:1px solid #334155; padding:7px; border-radius:6px;">
+        <label style="color:#93C5FD; font-weight:600;">👁️ 第一人稱未轉頭視野範圍 (度 °)</label>
+        <div class="field-row" style="margin-top:3px;">
+          <div><span style="font-size:10px;color:#CBD5E1;">左右視角</span><input type="number" id="human-fov-h" value="100" min="40" max="160"></div>
+          <div><span style="font-size:10px;color:#CBD5E1;">上視角</span><input type="number" id="human-fov-up" value="50" min="15" max="85"></div>
+          <div><span style="font-size:10px;color:#CBD5E1;">下視角</span><input type="number" id="human-fov-down" value="65" min="15" max="85"></div>
+        </div>
       </div>
 
       <div class="field-group">
@@ -249,11 +258,24 @@
       </div>
 
       <div class="field-group">
-        <label>人物姿勢切換</label>
+        <label>人物姿勢切換 (坐下時雙腳著地、臀部貼齊座高)</label>
         <div class="quick-add-sub">
           <button id="btn-posture-stand" class="active" onclick="setHumanPosture('stand')">🧍 站立平視</button>
           <button id="btn-posture-sit" onclick="setHumanPosture('sit')">🪑 坐下視角</button>
           <button id="btn-posture-lie" onclick="setHumanPosture('lie')">🛏️ 躺下仰視</button>
+        </div>
+      </div>
+
+      <!-- 坐下模式專屬選項：坐床邊 (可沿床邊移動) vs 坐椅子上 (下拉選擇椅子) -->
+      <div id="sit-options-box" style="display:none; background:#172554; border:1px solid #3B82F6; border-radius:6px; padding:8px; flex-direction:column; gap:6px;">
+        <div style="font-size:11px; font-weight:bold; color:#93C5FD;">🪑 坐姿位置選擇 (腳著地、臀部貼齊座高)</div>
+        <div class="field-row">
+          <button id="btn-sit-bed-edge" onclick="sitAtBedEdge()" style="width:100%;">🛏️ 坐床邊 (可沿床邊移動)</button>
+          <button id="btn-sit-on-chair" onclick="sitOnSelectedChair()" style="width:100%;">🪑 坐椅子上</button>
+        </div>
+        <div class="field-group" style="margin:0;">
+          <label style="color:#BAE6FD;">選擇要坐哪一張椅子：</label>
+          <select id="sit-chair-select" onchange="sitOnSelectedChair()"></select>
         </div>
       </div>
 
@@ -272,7 +294,7 @@
       </div>
 
       <div class="field-group" id="human-pitch-group">
-        <label><span>📐 抬頭/低頭仰角 (-75°～+60°)</span><span id="human-pitch-val" style="color:#38BDF8;">0°</span></label>
+        <label><span>📐 抬頭/低頭仰角</span><span id="human-pitch-val" style="color:#38BDF8;">0°</span></label>
         <input type="range" id="human-pitch-slider" min="-75" max="60" value="0" style="width:100%;">
         <input type="number" id="human-pitch" min="-75" max="60">
       </div>
@@ -281,8 +303,8 @@
         👁️ 進入第一人稱視角
       </button>
       <div class="field-row" style="margin-top:4px;">
-        <button onclick="placeHumanOnBed('sit')" style="width:100%; padding:7px;">🪑 坐到床沿看房間</button>
-        <button onclick="placeHumanOnBed('lie')" style="width:100%; padding:7px;">🛏️ 躺到床上仰視房間</button>
+        <button onclick="sitAtBedEdge(); enterHumanFPV();" style="width:100%; padding:7px;">🪑 坐床邊看房間</button>
+        <button onclick="placeHumanOnBed('lie')" style="width:100%; padding:7px;">🛏️ 躺床上仰視房間</button>
       </div>
     </div>
 
@@ -319,7 +341,7 @@
         <button id="btn-mode-fpv" class="purple">👁️ 第一人稱視角</button>
       </div>
       <div class="hint-text" style="font-size: 11px; color: #94A3B8;">
-        💡 碰到牆壁或家具自動貼齊卡住 | 超過牆壁 3/4 自動移至房外備用區
+        💡 坐下時腳著地不穿模 | 可選坐床邊(沿床邊移動)或下拉選椅子坐
       </div>
     </div>
 
@@ -361,6 +383,12 @@
           <button id="hud-btn-lock-h" onclick="toggleLockHorizFPV()">🔓自由</button>
         </div>
 
+        <!-- 坐姿快捷切換 (坐床邊 vs 下拉選椅子) -->
+        <div id="hud-sit-bar" style="display:none; gap:3px; align-items:center;">
+          <button onclick="sitAtBedEdge()" style="font-size:9px; padding:2px 4px; flex-shrink:0;">坐床邊</button>
+          <select id="hud-chair-select" onchange="onHudChairSelectChange()" style="font-size:9px; padding:2px 3px;"></select>
+        </div>
+
         <!-- 十字方向鍵 + 視角仰角滑桿 -->
         <div style="display:flex; gap:6px; align-items:center; justify-content:space-between;">
           <div class="dpad-compact">
@@ -368,7 +396,7 @@
             <button id="dpad-up">▲</button>
             <div></div>
             <button id="dpad-left">◀</button>
-            <button onclick="placeHumanOnBed('sit')" title="上床" style="font-size:10px;background:#7C3AED;">🛏️</button>
+            <button onclick="sitAtBedEdge()" title="坐床邊" style="font-size:10px;background:#7C3AED;">🪑</button>
             <button id="dpad-right">▶</button>
             <div></div>
             <button id="dpad-down">▼</button>
@@ -381,7 +409,7 @@
             </label>
             <input type="range" id="hud-pitch-slider" min="-75" max="60" value="0" style="width:100%;">
             <div id="hud-eye-height-lbl" style="font-size:9px; color:#34D399; white-space:nowrap;">眼高: 165cm</div>
-            <div style="font-size:8px; color:#94A3B8; white-space:nowrap;">視野:110°(上60/下75)</div>
+            <div id="hud-fov-lbl" style="font-size:8px; color:#94A3B8; white-space:nowrap;">視野:100°(上50/下65)</div>
           </div>
         </div>
       </div>
