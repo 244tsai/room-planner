@@ -31,6 +31,9 @@ let fpvLastX = 0, fpvLastY = 0;
 let toastTimeout = null;
 let draggedItemId = null;
 
+// 右側分類展開狀態紀錄：預設為空集合 = 預設全部縮起來不展開！
+let expandedCategories = new Set();
+
 function showToast(msg) {
   const el = document.getElementById("toast-msg");
   if (!el) return;
@@ -40,12 +43,10 @@ function showToast(msg) {
   toastTimeout = setTimeout(() => el.classList.remove("show"), 1800);
 }
 
-// 判斷是否為「床」分類物件
 function isBedItem(it) {
   return it.category === "床" || it.id === "bed" || (it.name && it.name.includes("床") && !it.name.includes("櫃"));
 }
 
-// 碰撞偵測與踏上床面高度計算
 function checkHumanWalkable(nx, ny) {
   const radius = 14;
   const rw = appState.room.width, rd = appState.room.depth;
@@ -110,7 +111,6 @@ function tryMoveHumanTo(nx, ny, showBlockMsg = false) {
   return false;
 }
 
-// 真實人類站/坐/躺視角眼高計算
 function getHumanEyeHeight() {
   const h = appState.human;
   const stature = h.height || 178;
@@ -211,6 +211,7 @@ function moveItemToCategory(itemId, targetCat) {
   const item = appState.items.find(i => i.id === itemId);
   if (!item) return;
   item.category = targetCat;
+  expandedCategories.add(targetCat);
   draggedItemId = null;
   updateLeftItemPanel();
   renderRightPanel();
@@ -377,6 +378,7 @@ function initFabric() {
   renderVoidListUI();
   renderFullScene();
   zoomToFit();
+  initPanelResizers();
 }
 
 function renderFullScene() {
@@ -794,8 +796,10 @@ function updateSingleItemVisual(item) {
 
     const rawVal = e.target.value;
     if (id === "prop-name") item.name = rawVal;
-    else if (id === "prop-category") item.category = rawVal;
-    else if (id === "prop-type") {
+    else if (id === "prop-category") {
+      item.category = rawVal;
+      expandedCategories.add(rawVal);
+    } else if (id === "prop-type") {
       item.item_type = rawVal;
       if (rawVal === "window" && !item.scenery) item.scenery = appState.default_fuji;
       updateLeftItemPanel();
@@ -882,25 +886,76 @@ document.getElementById("btn-clear-texture").addEventListener("click", () => {
   renderFullScene();
 });
 
-function addNewObject(type) {
-  const chosenCat = document.getElementById("new-obj-category").value || appState.categories[0];
-  let newItem;
-  if (type === 'window') {
-    newItem = { id: "win_" + Date.now(), name: "窗戶", category: chosenCat, item_type: "window", x: 150, y: 348, z: 85, w: 120, d: 12, h: 130, rot: 0, color: "#F59E0B", texture: "", scenery: appState.default_fuji, flip_x: false, flip_y: false };
-  } else if (type === 'socket') {
-    newItem = { id: "soc_" + Date.now(), name: "插座", category: chosenCat, item_type: "socket", x: 280, y: 348, z: 30, w: 22, d: 12, h: 14, rot: 0, color: "#F97316", texture: "", scenery: "", flip_x: false, flip_y: false };
-  } else if (type === 'switch') {
-    newItem = { id: "sw_" + Date.now(), name: "開關", category: chosenCat, item_type: "switch", x: 240, y: 348, z: 110, w: 22, d: 12, h: 14, rot: 0, color: "#0EA5E9", texture: "", scenery: "", flip_x: false, flip_y: false };
-  } else if (type === 'door') {
-    newItem = { id: "door_" + Date.now(), name: "房門", category: chosenCat, item_type: "door", x: 20, y: 346, z: 0, w: 90, d: 14, h: 210, rot: 0, color: "#8B5A2B", texture: "", scenery: "", flip_x: false, flip_y: false };
+// 切換新增物件種類下拉選單時，自動帶入建議尺寸（需按確認按鈕才會新增）
+window.onNewObjTypeChange = function() {
+  const t = document.getElementById("new-obj-type").value;
+  const cat = document.getElementById("new-obj-category").value;
+  const nameEl = document.getElementById("new-obj-name");
+  const wEl = document.getElementById("new-obj-w");
+  const dEl = document.getElementById("new-obj-d");
+  const hEl = document.getElementById("new-obj-h");
+  const zEl = document.getElementById("new-obj-z");
+
+  if (t === "window") {
+    nameEl.value = "窗戶"; wEl.value = 120; dEl.value = 12; hEl.value = 130; zEl.value = 85;
+  } else if (t === "socket") {
+    nameEl.value = "插座"; wEl.value = 22; dEl.value = 12; hEl.value = 14; zEl.value = 30;
+  } else if (t === "switch") {
+    nameEl.value = "開關"; wEl.value = 22; dEl.value = 12; hEl.value = 14; zEl.value = 110;
+  } else if (t === "door") {
+    nameEl.value = "房門"; wEl.value = 90; dEl.value = 14; hEl.value = 210; zEl.value = 0;
   } else {
-    newItem = { id: "item_" + Date.now(), name: chosenCat === "床" ? "雙人床" : "新家具", category: chosenCat, item_type: "furniture", x: 140, y: 140, z: 0, w: chosenCat === "床" ? 152 : 60, d: chosenCat === "床" ? 195 : 50, h: chosenCat === "床" ? 55 : 30, rot: 0, color: chosenCat === "床" ? "#FAD785" : "#38BDF8", texture: "", scenery: "", flip_x: false, flip_y: false };
+    if (cat === "床") {
+      nameEl.value = "雙人床"; wEl.value = 152; dEl.value = 195; hEl.value = 55; zEl.value = 0;
+    } else {
+      nameEl.value = "新家具"; wEl.value = 60; dEl.value = 50; hEl.value = 30; zEl.value = 0;
+    }
   }
+};
+
+window.confirmAddNewObject = function() {
+  const chosenCat = document.getElementById("new-obj-category").value || appState.categories[0];
+  const type = document.getElementById("new-obj-type").value || "furniture";
+  const name = document.getElementById("new-obj-name").value.trim() || "新物件";
+  const w = Math.max(4, parseFloat(document.getElementById("new-obj-w").value) || 60);
+  const d = Math.max(4, parseFloat(document.getElementById("new-obj-d").value) || 50);
+  const h = Math.max(4, parseFloat(document.getElementById("new-obj-h").value) || 30);
+  const z = parseFloat(document.getElementById("new-obj-z").value) || 0;
+
+  const colorMap = { window: "#F59E0B", socket: "#F97316", switch: "#0EA5E9", door: "#8B5A2B", furniture: chosenCat === "床" ? "#FAD785" : "#38BDF8" };
+  const newItem = {
+    id: "item_" + Date.now(),
+    name: name,
+    category: chosenCat,
+    item_type: type,
+    x: 120, y: 120, z: z,
+    w: w, d: d, h: h, rot: 0,
+    color: colorMap[type] || "#38BDF8",
+    texture: "",
+    scenery: type === "window" ? appState.default_fuji : "",
+    flip_x: false, flip_y: false
+  };
+  expandedCategories.add(chosenCat);
   appState.items.push(newItem);
   activeId = newItem.id;
   renderFullScene();
   selectItemById(newItem.id);
-}
+};
+
+// 刪除牆壁與天花板材質並立即同步回主畫面
+window.clearWallTexture = function() {
+  appState.room.wall_texture = "";
+  document.getElementById("wall-texture-file").value = "";
+  renderFullScene();
+  if (renderer) updateThreeScene();
+};
+
+window.clearCeilTexture = function() {
+  appState.room.ceiling_texture = "";
+  document.getElementById("ceil-texture-file").value = "";
+  renderFullScene();
+  if (renderer) updateThreeScene();
+};
 
 window.deleteSelectedActive = function() {
   if (activeId && activeId !== "HUMAN") deleteItemById(activeId);
@@ -949,15 +1004,15 @@ function renderVoidListUI() {
     const card = document.createElement("div");
     card.style.cssText = "background:#1F232B; border:1px solid #334155; border-radius:6px; padding:7px; margin-bottom:5px; display:flex; flex-direction:column; gap:5px;";
     card.innerHTML = `
-      <div style="display:flex; justify-content:space-between; align-items:center;">
-        <input type="text" value="${v.name}" ${disabledAttr} oninput="updateVoidField(${idx}, 'name', this.value)" style="width:125px; font-weight:600;">
-        <button class="danger" ${disabledAttr} onclick="deleteVoidArea(${idx})" style="padding:2px 6px; font-size:11px;">🗑️ 刪除</button>
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:4px;">
+        <input type="text" value="${v.name}" ${disabledAttr} oninput="updateVoidField(${idx}, 'name', this.value)" style="font-weight:600;">
+        <button class="danger" ${disabledAttr} onclick="deleteVoidArea(${idx})" style="padding:3px 6px; font-size:11px; flex-shrink:0;">🗑️</button>
       </div>
       <div class="field-row">
-        <div><span style="font-size:10px;color:#64748B;">寬 W</span><input type="number" value="${Math.round(v.w)}" ${disabledAttr} oninput="updateVoidField(${idx}, 'w', this.value)"></div>
-        <div><span style="font-size:10px;color:#64748B;">深 D</span><input type="number" value="${Math.round(v.d)}" ${disabledAttr} oninput="updateVoidField(${idx}, 'd', this.value)"></div>
-        <div><span style="font-size:10px;color:#64748B;">X</span><input type="number" value="${Math.round(v.x)}" ${disabledAttr} oninput="updateVoidField(${idx}, 'x', this.value)"></div>
-        <div><span style="font-size:10px;color:#64748B;">Y</span><input type="number" value="${Math.round(v.y)}" ${disabledAttr} oninput="updateVoidField(${idx}, 'y', this.value)"></div>
+        <div><span style="font-size:10px;color:#94A3B8;">寬 W</span><input type="number" value="${Math.round(v.w)}" ${disabledAttr} oninput="updateVoidField(${idx}, 'w', this.value)"></div>
+        <div><span style="font-size:10px;color:#94A3B8;">深 D</span><input type="number" value="${Math.round(v.d)}" ${disabledAttr} oninput="updateVoidField(${idx}, 'd', this.value)"></div>
+        <div><span style="font-size:10px;color:#94A3B8;">X 坐標</span><input type="number" value="${Math.round(v.x)}" ${disabledAttr} oninput="updateVoidField(${idx}, 'x', this.value)"></div>
+        <div><span style="font-size:10px;color:#94A3B8;">Y 坐標</span><input type="number" value="${Math.round(v.y)}" ${disabledAttr} oninput="updateVoidField(${idx}, 'y', this.value)"></div>
       </div>
     `;
     container.appendChild(card);
@@ -976,7 +1031,7 @@ window.updateVoidField = function(idx, field, val) {
 
 window.addVoidArea = function() {
   if (!appState.room.editable) {
-    alert("💡 請先勾選上方「🔓 勾選才可拖曳/改動地面與留白處」！");
+    alert("💡 請先勾選上方「🔓 勾選才可拖曳/改動留白處」！");
     return;
   }
   appState.voids.push({ id: "void_" + Date.now(), name: `留白處 ${appState.voids.length + 1}`, x: 50, y: 50, w: 80, d: 80 });
@@ -1081,8 +1136,8 @@ function initHumanFormValues() {
   document.getElementById("human-pitch-val").innerText = Math.round(h.pitch || 0) + "°";
   document.getElementById("hud-pitch-lbl").innerText = Math.round(h.pitch || 0) + "°";
 
-  document.getElementById("human-eye-info").innerText = `自然眼高: ${eyeH} cm`;
-  document.getElementById("human-basez-info").innerText = `踏面高度 Z: ${Math.round(h.z || 0)} cm ${h.z > 0 ? '(已在床上)' : ''}`;
+  document.getElementById("human-eye-info").innerText = `眼高: ${eyeH} cm`;
+  document.getElementById("human-basez-info").innerText = `踏面Z: ${Math.round(h.z || 0)} cm ${h.z > 0 ? '(床上)' : ''}`;
   const hudEyeLbl = document.getElementById("hud-eye-height-lbl");
   if (hudEyeLbl) hudEyeLbl.innerText = `目前眼高: ${eyeH} cm (踏面Z:${Math.round(h.z || 0)})`;
 
@@ -1189,14 +1244,19 @@ function renderRightPanel() {
       if (draggedItemId) moveItemToCategory(draggedItemId, cat);
     });
 
+    const isExpanded = expandedCategories.has(cat);
     const header = document.createElement("div");
     header.className = "cat-header";
-    header.innerHTML = `<span>📁 ${cat} ${cat === '床' ? '🛏️' : ''}</span><span style="font-size:11px;color:#64748B;">${catItems.length} 項</span>`;
+    header.innerHTML = `<span>${isExpanded ? '📂' : '📁'} ${cat} ${cat === '床' ? '🛏️' : ''}</span><span style="font-size:11px;color:#64748B;">${catItems.length} 項 ${isExpanded ? '▾' : '▸'}</span>`;
 
     const listBox = document.createElement("div");
     listBox.className = "cat-items";
+    listBox.style.display = isExpanded ? "flex" : "none";
+
     header.onclick = () => {
-      listBox.style.display = listBox.style.display === "none" ? "flex" : "none";
+      if (expandedCategories.has(cat)) expandedCategories.delete(cat);
+      else expandedCategories.add(cat);
+      renderRightPanel();
     };
 
     catItems.forEach(item => {
@@ -1256,14 +1316,14 @@ function renderRightPanel() {
         <div class="item-card-header">
           <div class="name">
             <span style="color:#64748B;font-size:11px;cursor:grab;">⠿</span>
-            <span style="display:inline-block;width:11px;height:11px;border-radius:3px;background:${item.color};border:1px solid #fff;"></span>
+            <span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${item.color};border:1px solid #fff;"></span>
             <span>${item.name}</span>
             <span class="badge ${b.cls}">${b.text}</span>
           </div>
           <button class="card-del-btn" title="刪除" onclick="deleteItemById('${item.id}', event)">🗑️</button>
         </div>
         <div class="dims">
-          ${Math.round(item.w)}×${Math.round(item.d)}×${item.h || 30} cm | Z:${item.z || 0} | ${item.rot || 0}°
+          ${Math.round(item.w)}×${Math.round(item.d)}×${item.h || 30} | Z:${item.z || 0} | ${item.rot || 0}°
         </div>
       `;
       listBox.appendChild(card);
@@ -1313,7 +1373,7 @@ document.getElementById("btn-zoom-in").addEventListener("click", () => canvas.se
 document.getElementById("btn-zoom-out").addEventListener("click", () => canvas.setZoom(Math.max(canvas.getZoom() / 1.2, 0.2)));
 document.getElementById("btn-pan-toggle").addEventListener("click", function() {
   forcePanMode = !forcePanMode;
-  this.innerText = forcePanMode ? "✋ 強制平移: 開" : "✋ 強制平移: 關";
+  this.innerText = forcePanMode ? "✋ 平移: 開" : "✋ 平移: 關";
   this.classList.toggle("active", forcePanMode);
   renderFullScene();
 });
@@ -1387,3 +1447,49 @@ document.getElementById("btn-reset-default").addEventListener("click", () => {
     zoomToFit();
   }
 });
+
+// 左右面板寬度拖曳改變大小 + 手機鍵盤彈出時自動捲動避開遮擋
+function initPanelResizers() {
+  const leftPanel = document.getElementById("left-panel");
+  const rightPanel = document.getElementById("right-panel");
+  const leftResizer = document.getElementById("left-resizer");
+  const rightResizer = document.getElementById("right-resizer");
+
+  let resizingSide = null;
+
+  const startResize = (side, e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    resizingSide = side;
+  };
+
+  if (leftResizer) leftResizer.addEventListener("pointerdown", e => startResize("left", e));
+  if (rightResizer) rightResizer.addEventListener("pointerdown", e => startResize("right", e));
+
+  window.addEventListener("pointermove", e => {
+    if (!resizingSide) return;
+    if (resizingSide === "left") {
+      const newW = Math.max(145, Math.min(window.innerWidth * 0.88, e.clientX));
+      leftPanel.style.width = newW + "px";
+    } else if (resizingSide === "right") {
+      const newW = Math.max(145, Math.min(window.innerWidth * 0.88, window.innerWidth - e.clientX));
+      rightPanel.style.width = newW + "px";
+    }
+    window.dispatchEvent(new Event("resize"));
+  });
+
+  window.addEventListener("pointerup", () => {
+    resizingSide = null;
+  });
+
+  document.querySelectorAll("input, select").forEach(el => {
+    el.addEventListener("focus", () => {
+      setTimeout(() => {
+        el.scrollIntoView({ behavior: "smooth", block: "center" });
+      }, 280);
+    });
+  });
+
+  const newCatSel = document.getElementById("new-obj-category");
+  if (newCatSel) newCatSel.addEventListener("change", window.onNewObjTypeChange);
+}
