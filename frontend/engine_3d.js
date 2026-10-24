@@ -1,4 +1,5 @@
-// 建構具手腳關節軸心 (Pivot Joints) 的 3D 擬真人物，支援走動時自然擺手擺腿動畫
+// 建構具手腳關節軸心的 3D 擬真人物：
+// 坐姿修正：雙腳鞋底永遠踩在地面 (y = 0，絕不穿模入地)，臀部底面精準貼齊 seat_h (床高或椅子坐墊高)！
 function buildRealistic3DHuman(hData) {
   const group = new THREE.Group();
   const stature = hData.height || 178;
@@ -37,7 +38,6 @@ function buildRealistic3DHuman(hData) {
     torsoMesh.position.set(0, 118 * s, 0);
     pelvisMesh.position.set(0, 86 * s, 0);
 
-    // 肩膀關節軸心 (供走路自然擺手動畫旋轉)
     const armGeo = new THREE.CylinderGeometry(4.2 * s, 3.5 * s, 52 * s, 12);
     const armLPivot = new THREE.Group();
     armLPivot.position.set(-20 * s, 140 * s, 0);
@@ -51,7 +51,6 @@ function buildRealistic3DHuman(hData) {
     armRMesh.position.y = -26 * s;
     armRPivot.add(armRMesh);
 
-    // 髖部關節軸心 (供走路自然邁步擺腿動畫旋轉)
     const legGeo = new THREE.CylinderGeometry(6 * s, 4.5 * s, 74 * s, 12);
     const shoeGeo = new THREE.BoxGeometry(10 * s, 7 * s, 22 * s);
 
@@ -75,33 +74,46 @@ function buildRealistic3DHuman(hData) {
     group.userData.limbs = { armL: armLPivot, armR: armRPivot, legL: legLPivot, legR: legRPivot };
 
   } else if (posture === "sit") {
-    const seatOffset = (hData.z || 0) > 0 ? 0 : 42 * s;
-    pelvisMesh.position.set(0, (8 + seatOffset) * s, 0);
-    torsoMesh.position.set(0, (38 + seatOffset) * s, 0);
-    neckMesh.position.set(0, (66 + seatOffset) * s, 0);
-    headGroup.position.set(0, (78 + seatOffset) * s, 0);
+    // 坐姿：雙腳鞋底永遠著地 (y = 0)，臀部底面精準貼齊座高 seatH (床高 55cm 或椅子坐墊高)
+    const seatH = Math.max(25, hData.seat_h || 45);
+    const shoeH = 7 * s;
 
-    const armGeo = new THREE.CylinderGeometry(4.2 * s, 3.5 * s, 52 * s, 12);
-    const armL = new THREE.Mesh(armGeo, shirtMat);
-    armL.position.set(-20 * s, (38 + seatOffset) * s, -6 * s);
-    armL.rotation.x = 0.4;
-    const armR = new THREE.Mesh(armGeo, shirtMat);
-    armR.position.set(20 * s, (38 + seatOffset) * s, -6 * s);
-    armR.rotation.x = 0.4;
+    // 雙腳平踏於地面 (y = shoeH / 2)
+    const shoeGeo = new THREE.BoxGeometry(10 * s, shoeH, 22 * s);
+    const shoeL = new THREE.Mesh(shoeGeo, shoeMat);
+    shoeL.position.set(-8.5 * s, shoeH / 2, -28 * s);
+    const shoeR = new THREE.Mesh(shoeGeo, shoeMat);
+    shoeR.position.set(8.5 * s, shoeH / 2, -28 * s);
 
-    const thighGeo = new THREE.BoxGeometry(11 * s, 11 * s, 38 * s);
-    const thighL = new THREE.Mesh(thighGeo, pantsMat);
-    thighL.position.set(-8.5 * s, (8 + seatOffset) * s, -16 * s);
-    const thighR = new THREE.Mesh(thighGeo, pantsMat);
-    thighR.position.set(8.5 * s, (8 + seatOffset) * s, -16 * s);
-
-    const calfGeo = new THREE.CylinderGeometry(5 * s, 4 * s, 42 * s, 12);
+    // 小腿由腳踝 (shoeH) 垂直連接至座高 (seatH)
+    const calfLen = Math.max(12, seatH - shoeH);
+    const calfGeo = new THREE.CylinderGeometry(5 * s, 4 * s, calfLen, 12);
     const calfL = new THREE.Mesh(calfGeo, pantsMat);
-    calfL.position.set(-8.5 * s, (-12 + seatOffset) * s, -32 * s);
+    calfL.position.set(-8.5 * s, shoeH + calfLen / 2, -24 * s);
     const calfR = new THREE.Mesh(calfGeo, pantsMat);
-    calfR.position.set(8.5 * s, (-12 + seatOffset) * s, -32 * s);
+    calfR.position.set(8.5 * s, shoeH + calfLen / 2, -24 * s);
 
-    rig.add(headGroup, neckMesh, torsoMesh, pelvisMesh, armL, armR, thighL, thighR, calfL, calfR);
+    // 水平大腿與臀部底面貼齊 seatH
+    const thighGeo = new THREE.BoxGeometry(11 * s, 11 * s, 32 * s);
+    const thighL = new THREE.Mesh(thighGeo, pantsMat);
+    thighL.position.set(-8.5 * s, seatH + 5.5 * s, -12 * s);
+    const thighR = new THREE.Mesh(thighGeo, pantsMat);
+    thighR.position.set(8.5 * s, seatH + 5.5 * s, -12 * s);
+
+    pelvisMesh.position.set(0, seatH + 7 * s, 0);
+    torsoMesh.position.set(0, seatH + 37 * s, 0);
+    neckMesh.position.set(0, seatH + 65 * s, 0);
+    headGroup.position.set(0, seatH + 77 * s, 0);
+
+    const armGeo = new THREE.CylinderGeometry(4.2 * s, 3.5 * s, 48 * s, 12);
+    const armL = new THREE.Mesh(armGeo, shirtMat);
+    armL.position.set(-20 * s, seatH + 37 * s, -6 * s);
+    armL.rotation.x = 0.35;
+    const armR = new THREE.Mesh(armGeo, shirtMat);
+    armR.position.set(20 * s, seatH + 37 * s, -6 * s);
+    armR.rotation.x = 0.35;
+
+    rig.add(headGroup, neckMesh, torsoMesh, pelvisMesh, armL, armR, thighL, thighR, calfL, calfR, shoeL, shoeR);
 
   } else {
     headGroup.position.set(0, 18 * s, 52 * s);
@@ -132,7 +144,9 @@ function buildRealistic3DHuman(hData) {
     rig.add(headGroup, neckMesh, torsoMesh, pelvisMesh, armL, armR, legL, legR);
   }
 
-  const eyeLocalY = getHumanEyeHeight() - (hData.z || 0);
+  // 坐下時整個 group 的腳底基準在地面 0；站立或躺床時則在 hData.z
+  const groupBaseY = (posture === "sit") ? 0 : (hData.z || 0);
+  const eyeLocalY = getHumanEyeHeight() - groupBaseY;
   const coneGeo = new THREE.ConeGeometry(11, 38, 12);
   coneGeo.rotateX(-Math.PI / 2);
   const coneMesh = new THREE.Mesh(coneGeo, new THREE.MeshBasicMaterial({ color: 0xA855F7, wireframe: true }));
@@ -140,18 +154,17 @@ function buildRealistic3DHuman(hData) {
   rig.add(coneMesh);
 
   group.add(rig);
-  group.position.set(hData.x, hData.z || 0, hData.y);
+  group.position.set(hData.x, groupBaseY, hData.y);
   group.rotation.y = -(hData.rot || 0) * Math.PI / 180;
   group.userData.isHuman = true;
   return group;
 }
 
-// 驅動 3D 人物手腳走路擺動動畫
 function updateHumanWalkAnimation(isMoving) {
   if (!human3DGroup || !human3DGroup.userData.limbs) return;
   const limbs = human3DGroup.userData.limbs;
   if (isMoving) {
-    const swing = Math.sin(Date.now() * 0.01) * 0.55;
+    const swing = Math.sin(Date.now() * 0.008) * 0.52;
     limbs.armL.rotation.x = swing;
     limbs.armR.rotation.x = -swing;
     limbs.legL.rotation.x = -swing * 0.85;
@@ -164,9 +177,7 @@ function updateHumanWalkAnimation(isMoving) {
   }
 }
 
-// 設定攝影機投影矩陣：
-// 在第一人稱視角 (FPV) 採用非對稱真實人眼視野：左右視角共 110 度 (±55°)、上視角 60 度、下視角 75 度！
-// 在 3D 鳥瞰模式則恢復標準對稱透視矩陣
+// 讀取左側第一人稱可編輯的視野角度 (預設左右 100度、上 50度、下 65度) 建立非對稱透視投影矩陣
 function applyCameraProjection() {
   if (!camera) return;
   const container = document.getElementById("three-container");
@@ -177,11 +188,15 @@ function applyCameraProjection() {
   if (currentMode === "FPV") {
     const near = 2;
     const far = 6000;
-    const halfH = Math.tan(55 * Math.PI / 180) * near;   // 左右各 55 度 = 水平 110 度
-    const left = -halfH;
-    const right = halfH;
-    const top = Math.tan(60 * Math.PI / 180) * near;     // 上視角 60 度
-    const bottom = -Math.tan(75 * Math.PI / 180) * near; // 下視角 75 度
+    const fovH = appState.human.fov_h || 100;
+    const fovUp = appState.human.fov_up || 50;
+    const fovDown = appState.human.fov_down || 65;
+
+    const halfHoriz = Math.tan((fovH / 2) * Math.PI / 180) * near;
+    const left = -halfHoriz;
+    const right = halfHoriz;
+    const top = Math.tan(fovUp * Math.PI / 180) * near;
+    const bottom = -Math.tan(fovDown * Math.PI / 180) * near;
     camera.projectionMatrix.makePerspective(left, right, top, bottom, near, far);
     if (camera.projectionMatrixInverse) {
       camera.projectionMatrixInverse.copy(camera.projectionMatrix).invert();
@@ -194,7 +209,6 @@ function applyCameraProjection() {
   }
 }
 
-// 根據選取物件類別與是否鎖定縮放，設定 3D 控制器軸向規則
 function attachGizmoWithRules(mesh) {
   if (!transformControl || !mesh) return;
   transformControl.attach(mesh);
@@ -222,7 +236,6 @@ function attachGizmoWithRules(mesh) {
   if (curM === "translate") {
     transformControl.showX = true;
     transformControl.showZ = true;
-    // 只有窗戶/開關/插座/牆壁上物品可調整垂直高度 (Three.js 的 Y 軸)，其他家具強制貼地不顯示垂直移動軸
     transformControl.showY = isZAdjustableWallType(t);
   } else if (curM === "rotate") {
     transformControl.showX = false;
@@ -274,7 +287,6 @@ function initThree() {
     }
   });
 
-  // 3D 即時移動、縮放、旋轉：每一幀即時套用「卡住在牆壁或障礙物邊緣」計算，不整段跳回原點！
   transformControl.addEventListener('change', function() {
     if (!transformControl.object || !transformControl.dragging) return;
     const obj = transformControl.object;
@@ -284,7 +296,8 @@ function initThree() {
       const nx = Math.round(obj.position.x);
       const ny = Math.round(obj.position.z);
       tryMoveHumanTo(nx, ny, false);
-      obj.position.set(appState.human.x, appState.human.z || 0, appState.human.y);
+      const groupBaseY = (appState.human.posture === "sit") ? 0 : (appState.human.z || 0);
+      obj.position.set(appState.human.x, groupBaseY, appState.human.y);
       appState.human.rot = Math.round((-obj.rotation.y * 180 / Math.PI % 360 + 360) % 360);
       initHumanFormValues();
 
@@ -312,7 +325,6 @@ function initThree() {
       }
       item.rot = Math.round((-obj.rotation.y * 180 / Math.PI % 360 + 360) % 360);
 
-      // 即時套用物理卡住規則 (未滿牆壁 3/4 卡在牆內，超過 3/4 移出房外，碰到其他物品卡在邊緣)
       enforceItemConstraints(item, mode, false);
 
       const h = item.h || 30;
@@ -356,8 +368,9 @@ function initThree() {
       fpvLastY = e.clientY;
       appState.human.rot = ((appState.human.rot + dx * 0.32) % 360 + 360) % 360;
       if (!appState.human.lock_horizontal) {
-        // 限制抬頭最多 +60 度、低頭最多 -75 度
-        appState.human.pitch = Math.max(-75, Math.min(60, (appState.human.pitch || 0) - dy * 0.32));
+        const maxUp = appState.human.fov_up || 50;
+        const maxDown = -(appState.human.fov_down || 65);
+        appState.human.pitch = Math.max(maxDown, Math.min(maxUp, (appState.human.pitch || 0) - dy * 0.32));
       }
       initHumanFormValues();
       syncFPVCamera();
@@ -559,7 +572,43 @@ function updateThreeScene() {
     const faceW = isEastWestWall ? item.d : item.w;
     const thickD = isEastWestWall ? item.w : item.d;
 
-    if (t === "window") {
+    if (t === "chair") {
+      // 🪑 3D 擬真椅子渲染：四根椅腳 + 坐墊(依設定之坐墊高度 seat_h 定位) + 椅背
+      itemMesh = new THREE.Group();
+      const seatH = Math.max(15, Math.min(h - 5, item.seat_h || 45));
+      const seatThick = 5;
+      const mat = item.texture ? new THREE.MeshLambertMaterial({ map: texLoader.load(item.texture) }) : new THREE.MeshLambertMaterial({ color: item.color });
+      const legMat = new THREE.MeshLambertMaterial({ color: 0x334155 });
+
+      // 坐墊平面 (頂面高度恰為 seatH，相對中心偏移為 seatH - h/2)
+      const seatGeo = new THREE.BoxGeometry(item.w, seatThick, item.d);
+      const seatMesh = new THREE.Mesh(seatGeo, mat);
+      seatMesh.position.y = -h / 2 + seatH - seatThick / 2;
+      seatMesh.add(new THREE.LineSegments(new THREE.EdgesGeometry(seatGeo), new THREE.LineBasicMaterial({ color: 0x1E293B })));
+      itemMesh.add(seatMesh);
+
+      // 椅背 (由坐墊向上延伸至總高度 h，位於椅子後方 +Z)
+      const backH = Math.max(5, h - seatH);
+      const backThick = Math.max(4, item.d * 0.12);
+      const backGeo = new THREE.BoxGeometry(item.w, backH, backThick);
+      const backMesh = new THREE.Mesh(backGeo, mat);
+      backMesh.position.set(0, -h / 2 + seatH + backH / 2, item.d / 2 - backThick / 2);
+      backMesh.add(new THREE.LineSegments(new THREE.EdgesGeometry(backGeo), new THREE.LineBasicMaterial({ color: 0x1E293B })));
+      itemMesh.add(backMesh);
+
+      // 四根椅腳 (由地面 0 延伸至坐墊底部)
+      const legLen = Math.max(10, seatH - seatThick);
+      const legGeo = new THREE.CylinderGeometry(2.2, 1.8, legLen, 10);
+      const ox = item.w / 2 - 4;
+      const oz = item.d / 2 - 4;
+      [[-ox, -oz], [ox, -oz], [-ox, oz], [ox, oz]].forEach(([lx, lz]) => {
+        const leg = new THREE.Mesh(legGeo, legMat);
+        leg.position.set(lx, -h / 2 + legLen / 2, lz);
+        itemMesh.add(leg);
+      });
+      itemMesh.rotation.y = -(item.rot || 0) * Math.PI / 180;
+
+    } else if (t === "window") {
       itemMesh = new THREE.Group();
       const fDepth = Math.max(thickD, 8);
       const frameGeo = new THREE.BoxGeometry(faceW, h, fDepth);
@@ -705,16 +754,17 @@ function animateThree() {
 
   let isHumanMovingNow = false;
 
+  // 點擊走動速度再放慢 40% (2.66 * 0.6 = 1.60)
   if (walkTarget) {
     const dx = walkTarget.x - appState.human.x;
     const dy = walkTarget.y - appState.human.y;
     const dist = Math.hypot(dx, dy);
-    if (dist < 2.8) {
+    if (dist < 2.0) {
       tryMoveHumanTo(Math.round(walkTarget.x), Math.round(walkTarget.y), false);
       walkTarget = null;
       if (targetRingMesh) targetRingMesh.visible = false;
     } else {
-      const step = Math.min(dist, 2.66);
+      const step = Math.min(dist, 1.60);
       const nx = appState.human.x + (dx / dist) * step;
       const ny = appState.human.y + (dy / dist) * step;
       const moved = tryMoveHumanTo(nx, ny, true);
@@ -726,15 +776,17 @@ function animateThree() {
       }
     }
     if (human3DGroup) {
-      human3DGroup.position.set(appState.human.x, appState.human.z || 0, appState.human.y);
+      const groupBaseY = (appState.human.posture === "sit") ? 0 : (appState.human.z || 0);
+      human3DGroup.position.set(appState.human.x, groupBaseY, appState.human.y);
       human3DGroup.rotation.y = -(appState.human.rot || 0) * Math.PI / 180;
     }
     initHumanFormValues();
     if (currentMode === "FPV") syncFPVCamera();
   }
 
+  // 方向鍵與搖桿移動速度再放慢 40% (2.24 * 0.6 = 1.34)
   if (fpvMoveDir.forward !== 0 || fpvMoveDir.right !== 0) {
-    const speed = 2.24;
+    const speed = 1.34;
     const yawRad = (appState.human.rot || 0) * Math.PI / 180;
     const fx = Math.sin(yawRad), fz = -Math.cos(yawRad);
     const rx = Math.cos(yawRad), rz = Math.sin(yawRad);
@@ -743,7 +795,8 @@ function animateThree() {
     const moved = tryMoveHumanTo(nx, ny, true);
     if (moved) isHumanMovingNow = true;
     if (human3DGroup) {
-      human3DGroup.position.set(appState.human.x, appState.human.z || 0, appState.human.y);
+      const groupBaseY = (appState.human.posture === "sit") ? 0 : (appState.human.z || 0);
+      human3DGroup.position.set(appState.human.x, groupBaseY, appState.human.y);
     }
     initHumanFormValues();
     if (currentMode === "FPV") syncFPVCamera();
