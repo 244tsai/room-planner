@@ -11,7 +11,6 @@ if (appState.room.show_ceiling === undefined) appState.room.show_ceiling = false
 if (appState.room.lock_scale === undefined) appState.room.lock_scale = false;
 if (appState.compass.auto_center === undefined) appState.compass.auto_center = true;
 
-// 若啟用自動置中，確保初始八方座向中心位於地基長寬除以2
 if (appState.compass.auto_center) {
   appState.compass.x = Math.round(appState.room.width / 2);
   appState.compass.y = Math.round(appState.room.depth / 2);
@@ -39,10 +38,9 @@ let fpvLastX = 0, fpvLastY = 0;
 let toastTimeout = null;
 let draggedItemId = null;
 
-// 記錄每個物件最後一次合法不重疊的位置與尺寸，供碰撞退回使用
+// 記錄每個物件的上一幀合法狀態，供即時卡住(Clamp)使用，絕不整段跳回起點
 let lastValidItemMap = {};
 
-// 右側分類展開狀態：預設全部收合
 let expandedCategories = new Set();
 
 function showToast(msg) {
@@ -51,24 +49,21 @@ function showToast(msg) {
   el.innerText = msg;
   el.classList.add("show");
   if (toastTimeout) clearTimeout(toastTimeout);
-  toastTimeout = setTimeout(() => el.classList.remove("show"), 1900);
+  toastTimeout = setTimeout(() => el.classList.remove("show"), 1600);
 }
 
 function isBedItem(it) {
   return it.category === "床" || it.id === "bed" || (it.name && it.name.includes("床") && !it.name.includes("櫃"));
 }
 
-// 判斷是否為可調整 Z 軸的牆面物件 (窗戶、插座、開關、牆壁上物品)
 function isZAdjustableWallType(t) {
   return ["window", "socket", "switch", "wall_item"].includes(t);
 }
 
-// 判斷是否為往牆壁外側突出的牆面設施 (窗戶、插座、開關)
 function isOuterWallProtrudingType(t) {
   return ["window", "socket", "switch"].includes(t);
 }
 
-// 取得物件旋轉後的軸對齊邊界框 (AABB)
 function getItemAABB(it) {
   const rad = (it.rot || 0) * Math.PI / 180;
   const cx = it.x + it.w / 2;
@@ -82,46 +77,57 @@ function getItemAABB(it) {
     y0: cy - bd / 2,
     x1: cx + bw / 2,
     y1: cy + bd / 2,
+    bw: bw,
+    bd: bd,
     z0: it.z || 0,
     z1: (it.z || 0) + (it.h || 30)
   };
 }
 
-// 檢查兩個物件是否在 3D 空間 (X, Y, Z) 發生穿模重疊
 function isTwoItemsOverlapping(a, b) {
   const boxA = getItemAABB(a);
   const boxB = getItemAABB(b);
-  const eps = 0.5; // 允許貼齊邊界 0.5cm 容差
+  const eps = 0.4;
   const overlapX = (boxA.x0 + eps < boxB.x1) && (boxA.x1 - eps > boxB.x0);
   const overlapY = (boxA.y0 + eps < boxB.y1) && (boxA.y1 - eps > boxB.y0);
   const overlapZ = (boxA.z0 + eps < boxB.z1) && (boxA.z1 - eps > boxB.z0);
   return overlapX && overlapY && overlapZ;
 }
 
-// 強制執行所有物理約束：
-// 1. 高度防穿模 (不可低於地板 Z<0、不可高於天花板 Z+H > roomH)
-// 2. 除窗戶/插座/開關/牆壁上物品外，其餘物件一律強制在地板上 (Z=0)
-// 3. 牆上物品/窗戶/開關/插座/門：強制吸附於四面牆壁，不可懸空飄在房內；其中窗戶/插座/開關往牆壁外側突出
-// 4. 一般地面物件若超過牆壁邊界，直接移出至房間外備用區 (不卡在牆上穿模)
-// 5. 檢查與其他所有物品是否重疊穿模
-function enforceItemConstraints(item, showMsg = true) {
+function hasAnyCollision(item) {
+  for (let i = 0; i < appState.items.length; i++) {
+    const other = appState.items[i];
+    if (other.id === item.id) continue;
+    if (isTwoItemsOverlapping(item, other)) return other;
+  }
+  return null;
+}
+
+function saveValidItemBackup(item) {
+  lastValidItemMap[item.id] = {
+    x: item.x, y: item.y, z: item.z || 0,
+    w: item.w, d: item.d, h: item.h || 30, rot: item.rot || 0
+  };
+}
+
+// 核心物理規則引擎（支援即時「卡住在牆壁或障礙物邊緣」，且超過牆壁 3/4 才移出房外備用區）：
+// mode: 'move' | 'scale' | 'rotate' | 'input'
+function enforceItemConstraints(item, mode = "move", showMsg = false) {
   const rw = appState.room.width;
   const rd = appState.room.depth;
   const rh = appState.room.height;
   const t = item.item_type || "furniture";
+  const prev = lastValidItemMap[item.id] || { x: item.x, y: item.y, z: item.z || 0, w: item.w, d: item.d, h: item.h || 30, rot: item.rot || 0 };
 
-  // 限制物品自身高度不可超過天花板
-  if ((item.h || 30) > rh) item.h = rh;
-
-  // Z 軸與地板/天花板防穿模
+  // 1. 高度與天地防穿模 (卡在地板 0 與天花板 rh 之間)
+  item.h = Math.max(4, Math.min(rh, Math.round(item.h || 30)));
   if (isZAdjustableWallType(t)) {
-    item.z = Math.max(0, Math.min(rh - (item.h || 30), Math.round(item.z || 0)));
+    item.z = Math.max(0, Math.min(rh - item.h, Math.round(item.z || 0)));
   } else {
-    // 除窗戶、開關、插座、牆壁上物品外，所有家具與房門皆固定在地板上，不可懸浮
     item.z = 0;
   }
 
-  // 牆面專屬物件吸附邏輯 (只能在牆壁上移動，不可飄進房間中央)
+  // 2. 牆面專屬物品 (窗戶、插座、開關、牆壁上物品、門)：吸附於四面牆壁滑動並卡在牆端點
   if (["window", "socket", "switch", "wall_item", "door"].includes(t)) {
     const cx = item.x + item.w / 2;
     const cy = item.y + item.d / 2;
@@ -131,13 +137,12 @@ function enforceItemConstraints(item, showMsg = true) {
     const distE = Math.abs(cx - rw);
     const minDist = Math.min(distN, distS, distW, distE);
 
-    const protrudeOut = isOuterWallProtrudingType(t); // 窗戶/開關/插座往牆壁外面突出，不佔房內空間
+    const protrudeOut = isOuterWallProtrudingType(t);
     const longSide = Math.max(item.w, item.d);
     const shortSide = Math.min(item.w, item.d);
 
     if (minDist === distN || minDist === distS) {
-      // 吸附於北牆 (y=0) 或 南牆 (y=rd)
-      item.w = longSide;
+      item.w = Math.min(rw, longSide);
       item.d = Math.min(shortSide, 24);
       item.rot = 0;
       item.x = Math.max(0, Math.min(rw - item.w, Math.round(cx - item.w / 2)));
@@ -149,9 +154,8 @@ function enforceItemConstraints(item, showMsg = true) {
         item.wall = "south";
       }
     } else {
-      // 吸附於西牆 (x=0) 或 東牆 (x=rw)
       item.w = Math.min(shortSide, 24);
-      item.d = longSide;
+      item.d = Math.min(rd, longSide);
       item.rot = 0;
       item.y = Math.max(0, Math.min(rd - item.d, Math.round(cy - item.d / 2)));
       if (minDist === distW) {
@@ -163,78 +167,133 @@ function enforceItemConstraints(item, showMsg = true) {
       }
     }
   } else {
-    // 一般地面家具：檢查是否跨過牆壁穿模
+    // 3. 一般地面家具：判斷牆壁「未滿 3/4 卡住貼牆」vs「超過 3/4 移出房外備用區」
     const box = getItemAABB(item);
-    const insideRoom = (box.x0 >= 0 && box.x1 <= rw && box.y0 >= 0 && box.y1 <= rd);
-    const completelyOutside = (box.x1 <= -5 || box.x0 >= rw + 5 || box.y1 <= -5 || box.y0 >= rd + 5);
+    const bw = Math.max(1, box.bw);
+    const bd = Math.max(1, box.bd);
 
-    if (!insideRoom && !completelyOutside) {
-      // 物件壓在牆壁上（超過牆壁）：直接將物品移出房間外備用區（不刪除）
-      const cx = (box.x0 + box.x1) / 2;
-      const cy = (box.y0 + box.y1) / 2;
-      const bw = box.x1 - box.x0;
-      const bd = box.y1 - box.y0;
-      const gap = 25; // 移出牆外 25cm 備用區
+    // 計算超出四面牆的比例
+    const overLeftRatio = (0 - box.x0) / bw;
+    const overRightRatio = (box.x1 - rw) / bw;
+    const overTopRatio = (0 - box.y0) / bd;
+    const overBottomRatio = (box.y1 - rd) / bd;
+    const maxOverRatio = Math.max(overLeftRatio, overRightRatio, overTopRatio, overBottomRatio);
 
-      const overL = -box.x0;
-      const overR = box.x1 - rw;
-      const overT = -box.y0;
-      const overB = box.y1 - rd;
-      const maxOver = Math.max(overL, overR, overT, overB);
+    const completelyOutside = (box.x1 <= -8 || box.x0 >= rw + 8 || box.y1 <= -8 || box.y0 >= rd + 8);
 
-      if (maxOver === overL) item.x = Math.round(-bw - gap);
-      else if (maxOver === overR) item.x = Math.round(rw + gap);
-      else if (maxOver === overT) item.y = Math.round(-bd - gap);
-      else item.y = Math.round(rd + gap);
-
-      if (showMsg) showToast("📦 物品超過牆壁，已自動移至房間外備用區！");
-    }
-  }
-
-  // 檢查物品與其他物品間是否互相穿模疊在一起
-  for (let i = 0; i < appState.items.length; i++) {
-    const other = appState.items[i];
-    if (other.id === item.id) continue;
-    if (isTwoItemsOverlapping(item, other)) {
-      // 發生重疊：退回最後合法位置與尺寸
-      const backup = lastValidItemMap[item.id];
-      if (backup) {
-        item.x = backup.x;
-        item.y = backup.y;
-        item.z = backup.z;
-        item.w = backup.w;
-        item.d = backup.d;
-        item.h = backup.h;
-        item.rot = backup.rot;
+    if (!completelyOutside && maxOverRatio > 0) {
+      if (maxOverRatio >= 0.75) {
+        // 超過牆壁四分之三 (75%)：直接將物品移出房間外備用區！
+        const gap = 24;
+        if (maxOverRatio === overLeftRatio) item.x = Math.round(-bw - gap + (bw - item.w) / 2);
+        else if (maxOverRatio === overRightRatio) item.x = Math.round(rw + gap + (bw - item.w) / 2);
+        else if (maxOverRatio === overTopRatio) item.y = Math.round(-bd - gap + (bd - item.d) / 2);
+        else item.y = Math.round(rd + gap + (bd - item.d) / 2);
+        if (showMsg) showToast("📦 超過牆壁 3/4，已移至房外備用區！");
+      } else {
+        // 未超過牆壁四分之三：直接讓它「卡住在牆壁內側邊緣」，不超過牆壁！
+        if (mode === "scale") {
+          // 縮放時若碰到牆壁，限制最大長寬卡在牆邊
+          if (box.x0 < 0 || box.x1 > rw) item.w = prev.w;
+          if (box.y0 < 0 || box.y1 > rd) item.d = prev.d;
+        } else if (mode === "rotate") {
+          item.rot = prev.rot;
+        }
+        // 重新取得邊界並將座標夾緊(Clamp)在牆壁內緣
+        const clampedBox = getItemAABB(item);
+        if (clampedBox.x0 < 0) item.x += (0 - clampedBox.x0);
+        if (clampedBox.x1 > rw) item.x -= (clampedBox.x1 - rw);
+        if (clampedBox.y0 < 0) item.y += (0 - clampedBox.y0);
+        if (clampedBox.y1 > rd) item.y -= (clampedBox.y1 - rd);
+        item.x = Math.round(item.x);
+        item.y = Math.round(item.y);
       }
-      if (showMsg) showToast(`⚠️ 不可與「${other.name}」重疊穿模！`);
-      return false;
     }
   }
 
-  // 紀錄此次合法狀態
+  // 4. 物品與物品之間的防穿模（碰到其他物品時「即時卡住在接觸邊緣」，而非整段取消退回原點）
+  let hitOther = hasAnyCollision(item);
+  if (hitOther) {
+    if (mode === "scale") {
+      // 縮放時碰到其他物件：分別測試保留新寬度或新深度，卡在剛好接觸的最大尺寸
+      const targetW = item.w, targetD = item.d, targetH = item.h;
+      item.w = targetW; item.d = prev.d; item.h = prev.h;
+      if (hasAnyCollision(item)) item.w = prev.w;
+
+      const safeW = item.w;
+      item.d = targetD;
+      if (hasAnyCollision(item)) item.d = prev.d;
+
+      const safeD = item.d;
+      item.h = targetH;
+      if (hasAnyCollision(item)) item.h = prev.h;
+
+      item.x = prev.x; item.y = prev.y; item.z = prev.z;
+    } else if (mode === "rotate") {
+      // 旋轉時碰到其他物件：卡在最後一個不碰撞的角度
+      item.rot = prev.rot;
+    } else {
+      // 移動時碰到其他物件：計算最小穿透推離向量 (MTV) 並允許沿著障礙物邊緣滑動卡住
+      const boxA = getItemAABB(item);
+      const boxB = getItemAABB(hitOther);
+
+      const pushLeft = boxA.x1 - boxB.x0;   // 將 A 往左推離 B
+      const pushRight = boxB.x1 - boxA.x0;  // 將 A 往右推離 B
+      const pushUp = boxA.y1 - boxB.y0;     // 將 A 往上推離 B
+      const pushDown = boxB.y1 - boxA.y0;   // 將 A 往下推離 B
+
+      const minPush = Math.min(pushLeft, pushRight, pushUp, pushDown);
+      if (minPush === pushLeft) item.x -= pushLeft;
+      else if (minPush === pushRight) item.x += pushRight;
+      else if (minPush === pushUp) item.y -= pushUp;
+      else item.y += pushDown;
+
+      // 推離貼齊後，若同時在牆內則確保不因此超出牆壁
+      const afterBox = getItemAABB(item);
+      const wasInside = (prev.x >= 0 && prev.x + prev.w <= rw && prev.y >= 0 && prev.y + prev.d <= rd);
+      if (wasInside) {
+        if (afterBox.x0 < 0) item.x += (0 - afterBox.x0);
+        if (afterBox.x1 > rw) item.x -= (afterBox.x1 - rw);
+        if (afterBox.y0 < 0) item.y += (0 - afterBox.y0);
+        if (afterBox.y1 > rd) item.y -= (afterBox.y1 - rd);
+      }
+
+      // 若多物件夾擊仍重疊，嘗試單軸滑動 (只動 X 或只動 Y)
+      if (hasAnyCollision(item)) {
+        const tryX = item.x, tryY = item.y;
+        item.x = tryX; item.y = prev.y;
+        if (hasAnyCollision(item)) {
+          item.x = prev.x; item.y = tryY;
+          if (hasAnyCollision(item)) {
+            item.x = prev.x; item.y = prev.y; item.z = prev.z;
+          }
+        }
+      }
+      item.x = Math.round(item.x);
+      item.y = Math.round(item.y);
+    }
+  }
+
   saveValidItemBackup(item);
   return true;
 }
 
-function saveValidItemBackup(item) {
-  lastValidItemMap[item.id] = {
-    x: item.x, y: item.y, z: item.z || 0,
-    w: item.w, d: item.d, h: item.h || 30, rot: item.rot || 0
-  };
-}
-
-// 為新物件尋找不重疊的初始擺放位置
 function findNonOverlappingSpot(newItem) {
-  if (enforceItemConstraints(newItem, false)) return;
+  saveValidItemBackup(newItem);
+  if (!hasAnyCollision(newItem)) {
+    enforceItemConstraints(newItem, "move", false);
+    return;
+  }
   const rw = appState.room.width, rd = appState.room.depth;
   for (let y = 10; y <= rd - newItem.d - 10; y += 25) {
     for (let x = 10; x <= rw - newItem.w - 10; x += 25) {
       newItem.x = x; newItem.y = y;
-      if (enforceItemConstraints(newItem, false)) return;
+      if (!hasAnyCollision(newItem)) {
+        saveValidItemBackup(newItem);
+        return;
+      }
     }
   }
-  // 若房間內已滿，直接放置於房間右側外備用區
   newItem.x = rw + 30;
   newItem.y = 20;
   saveValidItemBackup(newItem);
@@ -301,7 +360,7 @@ function tryMoveHumanTo(nx, ny, showBlockMsg = false) {
     appState.human.z = resY.baseZ;
     return true;
   }
-  if (showBlockMsg) showToast("⚠️ 前方有家具阻擋，人物無法穿越！");
+  if (showBlockMsg) showToast("⚠️ 前方有家具阻擋，人物已貼齊卡住！");
   return false;
 }
 
@@ -365,7 +424,6 @@ function switchLeftTab(tab) {
   document.getElementById("tab-content-" + tab).style.display = "flex";
 }
 
-// 鎖定既有物品縮放 (2D 與 3D 同步)
 window.toggleLockScaleBtn = function() {
   appState.room.lock_scale = !appState.room.lock_scale;
   syncLockScaleUI();
@@ -513,7 +571,6 @@ function initFabric() {
     preserveObjectStacking: true
   });
 
-  // 初始化所有預設物件的合法備份快照
   appState.items.forEach(it => saveValidItemBackup(it));
 
   bindDpadBtn("dpad-up", 0, 1);
@@ -597,9 +654,9 @@ function initFabric() {
   canvas.on('selection:created', onObjectSelected);
   canvas.on('selection:updated', onObjectSelected);
   canvas.on('selection:cleared', onObjectDeselected);
-  canvas.on('object:moving', onObjectLiveMoving);
-  canvas.on('object:scaling', onObjectLiveMoving);
-  canvas.on('object:rotating', onObjectLiveMoving);
+  canvas.on('object:moving', e => onObjectLiveTransform(e, "move"));
+  canvas.on('object:scaling', e => onObjectLiveTransform(e, "scale"));
+  canvas.on('object:rotating', e => onObjectLiveTransform(e, "rotate"));
   canvas.on('object:modified', onObjectModifiedComplete);
 
   const initWalk = checkHumanWalkable(appState.human.x, appState.human.y);
@@ -613,6 +670,7 @@ function initFabric() {
   renderFullScene();
   zoomToFit();
   initPanelResizers();
+  initFPVHudDragAndResize();
 }
 
 function renderFullScene() {
@@ -678,10 +736,11 @@ function renderFullScene() {
 
 function createFabricHuman() {
   const h = appState.human;
+  // 2D 視線扇形錐同步反映 110 度廣角視野
   const fovCone = new fabric.Polygon([
-    { x: 0, y: 0 }, { x: -32, y: -65 }, { x: 32, y: -65 }
+    { x: 0, y: 0 }, { x: -55, y: -45 }, { x: 55, y: -45 }
   ], {
-    fill: 'rgba(168, 85, 247, 0.32)', stroke: '#C084FC', strokeWidth: 1.5,
+    fill: 'rgba(168, 85, 247, 0.30)', stroke: '#C084FC', strokeWidth: 1.5,
     originX: 'center', originY: 'bottom', top: 0
   });
 
@@ -885,7 +944,8 @@ function onObjectDeselected() {
   highlightRightPanel();
 }
 
-function onObjectLiveMoving(e) {
+// 2D 即時拖曳、縮放、旋轉：每一幀即時執行「卡住在牆壁或障礙物邊緣」計算，不阻止整段動作！
+function onObjectLiveTransform(e, mode) {
   const target = e.target;
   if (!target) return;
 
@@ -901,17 +961,11 @@ function onObjectLiveMoving(e) {
   if (target.isHuman) {
     const nx = Math.round(target.left);
     const ny = Math.round(target.top);
-    const check = checkHumanWalkable(nx, ny);
-    if (check.allowed) {
-      appState.human.x = nx;
-      appState.human.y = ny;
-      appState.human.z = check.baseZ;
-    } else {
-      target.set({ left: appState.human.x, top: appState.human.y });
-      showToast("⚠️ 人物不可穿越家具物件！");
-    }
+    tryMoveHumanTo(nx, ny, false);
+    target.set({ left: appState.human.x, top: appState.human.y });
     appState.human.rot = Math.round((target.angle % 360 + 360) % 360);
     initHumanFormValues();
+
   } else if (target.itemId) {
     const item = appState.items.find(i => i.id === target.itemId);
     if (!item) return;
@@ -926,14 +980,35 @@ function onObjectLiveMoving(e) {
     }
 
     const baseRect = target.item(0);
-    if (!appState.room.lock_scale) {
+    if (mode === "scale" && !appState.room.lock_scale) {
       item.w = Math.max(4, Math.round(baseRect.width * Math.abs(target.scaleX)));
       item.d = Math.max(4, Math.round(baseRect.height * Math.abs(target.scaleY)));
     }
     item.rot = Math.round((target.angle % 360 + 360) % 360);
     item.x = Math.round(target.left - item.w / 2);
     item.y = Math.round(target.top - item.d / 2);
+
+    // 即時套用物理卡住規則 (超過牆壁 3/4 移出房外，未達 3/4 卡在牆內，碰到其他物品卡在邊緣)
+    enforceItemConstraints(item, mode, false);
+
+    // 將卡住後的合法位置與尺寸即時同步回畫布圖元，達成真實「頂住卡住」的手感
+    if (mode === "scale") {
+      target.set({
+        scaleX: item.w / baseRect.width,
+        scaleY: item.d / baseRect.height,
+        left: item.x + item.w / 2,
+        top: item.y + item.d / 2
+      });
+    } else if (mode === "rotate") {
+      target.set({ angle: item.rot });
+    } else {
+      target.set({
+        left: item.x + item.w / 2,
+        top: item.y + item.d / 2
+      });
+    }
     updateLeftItemPanel();
+
   } else if (target.voidId) {
     const v = appState.voids.find(x => x.id === target.voidId);
     if (!v) return;
@@ -956,15 +1031,6 @@ function onObjectModifiedComplete(e) {
   }
   trashEl.classList.remove("show", "hover");
   isOverTrash = false;
-  onObjectLiveMoving(e);
-
-  if (e.target && e.target.itemId) {
-    const item = appState.items.find(i => i.id === e.target.itemId);
-    if (item) {
-      enforceItemConstraints(item, true);
-      updateLeftItemPanel();
-    }
-  }
   renderFullScene();
 }
 
@@ -1007,13 +1073,11 @@ function updateLeftItemPanel() {
   document.getElementById("prop-rot-val").innerText = (item.rot || 0) + "°";
   setInputValueSafe("prop-color", item.color);
 
-  // 鎖定縮放時，寬深高欄位設為唯讀
   const lockS = !!appState.room.lock_scale;
   document.getElementById("prop-w").disabled = lockS;
   document.getElementById("prop-d").disabled = lockS;
   document.getElementById("prop-h").disabled = lockS;
 
-  // 只有窗戶/開關/插座/牆壁上物品可調整 Z 軸離地高度，其餘隱藏或鎖定 Z=0
   const canZ = isZAdjustableWallType(t);
   document.getElementById("prop-z-row").style.display = canZ ? "flex" : "none";
   document.getElementById("prop-z-hint").style.display = canZ ? "inline" : "none";
@@ -1022,8 +1086,8 @@ function updateLeftItemPanel() {
   document.getElementById("scenery-upload-group").style.display = (t === "window") ? "flex" : "none";
 }
 
-function updateSingleItemVisual(item) {
-  enforceItemConstraints(item, true);
+function updateSingleItemVisual(item, mode = "move") {
+  enforceItemConstraints(item, mode, true);
   updateLeftItemPanel();
   renderFullScene();
 }
@@ -1034,6 +1098,7 @@ function updateSingleItemVisual(item) {
     if (!item) return;
 
     const rawVal = e.target.value;
+    let mode = "move";
     if (id === "prop-name") item.name = rawVal;
     else if (id === "prop-category") {
       item.category = rawVal;
@@ -1042,7 +1107,7 @@ function updateSingleItemVisual(item) {
       item.item_type = rawVal;
       if (rawVal === "window" && !item.scenery) item.scenery = appState.default_fuji;
       if (!isZAdjustableWallType(rawVal)) item.z = 0;
-      enforceItemConstraints(item, true);
+      enforceItemConstraints(item, "move", true);
       updateLeftItemPanel();
       renderFullScene();
       return;
@@ -1052,19 +1117,18 @@ function updateSingleItemVisual(item) {
       if (rawVal === "" || rawVal === "-") return;
       const num = parseFloat(rawVal);
       if (isNaN(num)) return;
-      if (id === "prop-w" && !appState.room.lock_scale) item.w = Math.max(1, num);
-      if (id === "prop-d" && !appState.room.lock_scale) item.d = Math.max(1, num);
-      if (id === "prop-h" && !appState.room.lock_scale) item.h = Math.max(1, Math.min(appState.room.height, num));
+      if (id === "prop-w" && !appState.room.lock_scale) { item.w = Math.max(1, num); mode = "scale"; }
+      if (id === "prop-d" && !appState.room.lock_scale) { item.d = Math.max(1, num); mode = "scale"; }
+      if (id === "prop-h" && !appState.room.lock_scale) { item.h = Math.max(1, Math.min(appState.room.height, num)); mode = "scale"; }
       if (id === "prop-x") item.x = num;
       if (id === "prop-y") item.y = num;
       if (id === "prop-z" && isZAdjustableWallType(item.item_type)) item.z = Math.max(0, num);
       if (id === "prop-rot") {
         item.rot = ((num % 360) + 360) % 360;
-        document.getElementById("prop-rot-slider").value = item.rot;
-        document.getElementById("prop-rot-val").innerText = Math.round(item.rot) + "°";
+        mode = "rotate";
       }
     }
-    updateSingleItemVisual(item);
+    updateSingleItemVisual(item, mode);
   });
 });
 
@@ -1072,9 +1136,7 @@ document.getElementById("prop-rot-slider").addEventListener("input", e => {
   const item = appState.items.find(i => i.id === activeId);
   if (!item) return;
   item.rot = parseFloat(e.target.value) || 0;
-  document.getElementById("prop-rot").value = item.rot;
-  document.getElementById("prop-rot-val").innerText = item.rot + "°";
-  updateSingleItemVisual(item);
+  updateSingleItemVisual(item, "rotate");
 });
 
 document.getElementById("btn-door-flip-x").addEventListener("click", () => {
@@ -1245,557 +1307,4 @@ document.getElementById("room-editable-lock").addEventListener("change", functio
 function renderVoidListUI() {
   const container = document.getElementById("void-list-container");
   container.innerHTML = "";
-  const disabledAttr = appState.room.editable ? "" : "disabled";
-
-  appState.voids.forEach((v, idx) => {
-    const card = document.createElement("div");
-    card.style.cssText = "background:#1F232B; border:1px solid #334155; border-radius:6px; padding:7px; margin-bottom:5px; display:flex; flex-direction:column; gap:5px;";
-    card.innerHTML = `
-      <div style="display:flex; justify-content:space-between; align-items:center; gap:4px;">
-        <input type="text" value="${v.name}" ${disabledAttr} oninput="updateVoidField(${idx}, 'name', this.value)" style="font-weight:600;">
-        <button class="danger" ${disabledAttr} onclick="deleteVoidArea(${idx})" style="padding:3px 6px; font-size:11px; flex-shrink:0;">🗑️</button>
-      </div>
-      <div class="field-row">
-        <div><span style="font-size:10px;color:#94A3B8;">寬 W</span><input type="number" value="${Math.round(v.w)}" ${disabledAttr} oninput="updateVoidField(${idx}, 'w', this.value)"></div>
-        <div><span style="font-size:10px;color:#94A3B8;">深 D</span><input type="number" value="${Math.round(v.d)}" ${disabledAttr} oninput="updateVoidField(${idx}, 'd', this.value)"></div>
-        <div><span style="font-size:10px;color:#94A3B8;">X 坐標</span><input type="number" value="${Math.round(v.x)}" ${disabledAttr} oninput="updateVoidField(${idx}, 'x', this.value)"></div>
-        <div><span style="font-size:10px;color:#94A3B8;">Y 坐標</span><input type="number" value="${Math.round(v.y)}" ${disabledAttr} oninput="updateVoidField(${idx}, 'y', this.value)"></div>
-      </div>
-    `;
-    container.appendChild(card);
-  });
-}
-
-window.updateVoidField = function(idx, field, val) {
-  if (!appState.voids[idx]) return;
-  if (field === 'name') appState.voids[idx].name = val;
-  else {
-    if (val === "" || val === "-") return;
-    appState.voids[idx][field] = parseFloat(val) || 0;
-  }
-  renderFullScene();
-};
-
-window.addVoidArea = function() {
-  if (!appState.room.editable) {
-    alert("💡 請先勾選上方「🔓 勾選才可拖曳/改動留白處」！");
-    return;
-  }
-  appState.voids.push({ id: "void_" + Date.now(), name: `留白處 ${appState.voids.length + 1}`, x: 50, y: 50, w: 80, d: 80 });
-  renderVoidListUI();
-  renderFullScene();
-};
-
-window.deleteVoidArea = function(idx) {
-  appState.voids.splice(idx, 1);
-  renderVoidListUI();
-  renderFullScene();
-};
-
-function initRoomFormValues() {
-  document.getElementById("room-editable-lock").checked = !!appState.room.editable;
-  setInputValueSafe("room-w", appState.room.width);
-  setInputValueSafe("room-d", appState.room.depth);
-  setInputValueSafe("room-h", appState.room.height);
-  document.getElementById("room-show-walls").checked = !!appState.room.show_walls;
-  document.getElementById("room-show-ceiling").checked = !!appState.room.show_ceiling;
-  setInputValueSafe("room-wall-color", appState.room.wall_color || "#F8FAFC");
-  setInputValueSafe("room-ceil-color", appState.room.ceiling_color || "#FFFFFF");
-
-  document.getElementById("compass-show").checked = appState.compass.show;
-  document.getElementById("compass-auto-center").checked = !!appState.compass.auto_center;
-  setInputValueSafe("compass-x", appState.compass.x);
-  setInputValueSafe("compass-y", appState.compass.y);
-  setInputValueSafe("compass-rot", appState.compass.rotation || 0);
-  setInputValueSafe("compass-rot-slider", appState.compass.rotation || 0);
-  document.getElementById("compass-rot-val").innerText = (appState.compass.rotation || 0) + "°";
-
-  document.getElementById("feixing-show").checked = !!appState.compass.show_feixing;
-  setInputValueSafe("feixing-year", appState.compass.feixing_year || 2026);
-}
-
-function syncRoomFromInputs(e) {
-  if (e && (e.target.value === "" || e.target.value === "-")) return;
-  const targetId = e ? e.target.id : "";
-
-  appState.room.width = parseFloat(document.getElementById("room-w").value) || 400;
-  appState.room.depth = parseFloat(document.getElementById("room-d").value) || 300;
-  appState.room.height = parseFloat(document.getElementById("room-h").value) || 280;
-  appState.room.show_walls = document.getElementById("room-show-walls").checked;
-  appState.room.show_ceiling = document.getElementById("room-show-ceiling").checked;
-  appState.room.wall_color = document.getElementById("room-wall-color").value;
-  appState.room.ceiling_color = document.getElementById("room-ceil-color").value;
-
-  appState.compass.show = document.getElementById("compass-show").checked;
-  appState.compass.auto_center = document.getElementById("compass-auto-center").checked;
-
-  // 若使用者手動改了 compass-x 或 compass-y，取消自動置中；否則只要地基改變或勾選自動置中，自動設為 (width/2, depth/2)
-  if (targetId === "compass-x" || targetId === "compass-y") {
-    appState.compass.auto_center = false;
-    document.getElementById("compass-auto-center").checked = false;
-    appState.compass.x = parseFloat(document.getElementById("compass-x").value) || 200;
-    appState.compass.y = parseFloat(document.getElementById("compass-y").value) || 150;
-  } else if (appState.compass.auto_center || targetId === "room-w" || targetId === "room-d") {
-    appState.compass.x = Math.round(appState.room.width / 2);
-    appState.compass.y = Math.round(appState.room.depth / 2);
-    setInputValueSafe("compass-x", appState.compass.x);
-    setInputValueSafe("compass-y", appState.compass.y);
-  }
-
-  appState.compass.rotation = parseFloat(document.getElementById("compass-rot").value) || 0;
-  setInputValueSafe("compass-rot-slider", appState.compass.rotation);
-  document.getElementById("compass-rot-val").innerText = appState.compass.rotation + "°";
-
-  appState.compass.show_feixing = document.getElementById("feixing-show").checked;
-  appState.compass.feixing_year = parseInt(document.getElementById("feixing-year").value) || 2026;
-
-  // 地基改變時，重新校正牆上物品吸附位置與高度防穿模
-  appState.items.forEach(it => enforceItemConstraints(it, false));
-  renderFullScene();
-}
-
-document.querySelectorAll(".live-room-input").forEach(el => {
-  el.addEventListener("input", syncRoomFromInputs);
-});
-document.getElementById("compass-rot-slider").addEventListener("input", e => {
-  document.getElementById("compass-rot").value = e.target.value;
-  syncRoomFromInputs();
-});
-
-document.getElementById("wall-texture-file").addEventListener("change", function(e) {
-  const file = e.target.files[0];
-  if (!file) return;
-  const reader = new FileReader();
-  reader.onload = function(f) {
-    appState.room.wall_texture = f.target.result;
-    if (renderer) updateThreeScene();
-  };
-  reader.readAsDataURL(file);
-});
-document.getElementById("ceil-texture-file").addEventListener("change", function(e) {
-  const file = e.target.files[0];
-  if (!file) return;
-  const reader = new FileReader();
-  reader.onload = function(f) {
-    appState.room.ceiling_texture = f.target.result;
-    appState.room.show_ceiling = true;
-    document.getElementById("room-show-ceiling").checked = true;
-    if (renderer) updateThreeScene();
-  };
-  reader.readAsDataURL(file);
-});
-
-// 第一人稱「僅水平轉動」切換
-window.toggleLockHorizFPV = function() {
-  appState.human.lock_horizontal = !appState.human.lock_horizontal;
-  if (appState.human.lock_horizontal) {
-    appState.human.pitch = 0;
-  }
-  initHumanFormValues();
-  if (currentMode === "FPV") syncFPVCamera();
-};
-
-document.getElementById("human-lock-horiz").addEventListener("change", e => {
-  appState.human.lock_horizontal = e.target.checked;
-  if (appState.human.lock_horizontal) {
-    appState.human.pitch = 0;
-  }
-  initHumanFormValues();
-  if (currentMode === "FPV") syncFPVCamera();
-});
-
-function initHumanFormValues() {
-  const h = appState.human;
-  const eyeH = getHumanEyeHeight();
-  const lockH = !!h.lock_horizontal;
-
-  document.getElementById("human-lock-horiz").checked = lockH;
-  const hudLockBtn = document.getElementById("hud-btn-lock-h");
-  if (hudLockBtn) {
-    hudLockBtn.innerText = lockH ? "🔒 僅水平" : "🔓 自由視角";
-    hudLockBtn.classList.toggle("active", lockH);
-  }
-  document.getElementById("human-pitch-slider").disabled = lockH;
-  document.getElementById("human-pitch").disabled = lockH;
-  document.getElementById("hud-pitch-slider").disabled = lockH;
-
-  setInputValueSafe("human-height", h.height || 178);
-  setInputValueSafe("human-x", Math.round(h.x));
-  setInputValueSafe("human-y", Math.round(h.y));
-  setInputValueSafe("human-rot", Math.round(h.rot || 0));
-  setInputValueSafe("human-rot-slider", Math.round(h.rot || 0));
-  document.getElementById("human-rot-val").innerText = Math.round(h.rot || 0) + "°";
-
-  setInputValueSafe("human-pitch", Math.round(h.pitch || 0));
-  setInputValueSafe("human-pitch-slider", Math.round(h.pitch || 0));
-  setInputValueSafe("hud-pitch-slider", Math.round(h.pitch || 0));
-  document.getElementById("human-pitch-val").innerText = Math.round(h.pitch || 0) + "°";
-  document.getElementById("hud-pitch-lbl").innerText = Math.round(h.pitch || 0) + "°";
-
-  document.getElementById("human-eye-info").innerText = `眼高: ${eyeH} cm`;
-  document.getElementById("human-basez-info").innerText = `踏面Z: ${Math.round(h.z || 0)} cm ${h.z > 0 ? '(床上)' : ''}`;
-  const hudEyeLbl = document.getElementById("hud-eye-height-lbl");
-  if (hudEyeLbl) hudEyeLbl.innerText = `目前眼高: ${eyeH} cm (踏面Z:${Math.round(h.z || 0)})`;
-
-  const p = h.posture || "stand";
-  ["stand", "sit", "lie"].forEach(mode => {
-    const b1 = document.getElementById("btn-posture-" + mode);
-    const b2 = document.getElementById("hud-btn-" + mode);
-    if (b1) b1.classList.toggle("active", p === mode);
-    if (b2) b2.classList.toggle("active", p === mode);
-  });
-}
-
-["human-height", "human-x", "human-y", "human-rot", "human-pitch"].forEach(id => {
-  document.getElementById(id).addEventListener("input", e => {
-    if (e.target.value === "" || e.target.value === "-") return;
-    const val = parseFloat(e.target.value) || 0;
-    if (id === "human-height") appState.human.height = Math.max(60, val);
-    if (id === "human-x") tryMoveHumanTo(val, appState.human.y, true);
-    if (id === "human-y") tryMoveHumanTo(appState.human.x, val, true);
-    if (id === "human-rot") appState.human.rot = ((val % 360) + 360) % 360;
-    if (id === "human-pitch" && !appState.human.lock_horizontal) appState.human.pitch = Math.max(-85, Math.min(85, val));
-    initHumanFormValues();
-    renderFullScene();
-    if (currentMode === "FPV") syncFPVCamera();
-  });
-});
-
-document.getElementById("human-rot-slider").addEventListener("input", e => {
-  appState.human.rot = parseFloat(e.target.value) || 0;
-  initHumanFormValues();
-  renderFullScene();
-  if (currentMode === "FPV") syncFPVCamera();
-});
-
-document.getElementById("human-pitch-slider").addEventListener("input", e => {
-  if (appState.human.lock_horizontal) return;
-  appState.human.pitch = parseFloat(e.target.value) || 0;
-  initHumanFormValues();
-  if (currentMode === "FPV") syncFPVCamera();
-});
-
-document.getElementById("hud-pitch-slider").addEventListener("input", e => {
-  if (appState.human.lock_horizontal) return;
-  appState.human.pitch = parseFloat(e.target.value) || 0;
-  initHumanFormValues();
-  if (currentMode === "FPV") syncFPVCamera();
-});
-
-window.setHumanPosture = function(p) {
-  appState.human.posture = p;
-  if (!appState.human.lock_horizontal) {
-    if (p === "lie") {
-      appState.human.pitch = 35;
-      appState.room.show_ceiling = true;
-      document.getElementById("room-show-ceiling").checked = true;
-    } else if (p === "sit") {
-      appState.human.pitch = -5;
-    } else {
-      appState.human.pitch = 0;
-    }
-  }
-  const check = checkHumanWalkable(appState.human.x, appState.human.y);
-  appState.human.z = check.baseZ;
-  initHumanFormValues();
-  renderFullScene();
-  if (currentMode === "FPV") syncFPVCamera();
-};
-
-window.placeHumanOnBed = function(targetPosture = 'lie') {
-  const bed = appState.items.find(i => isBedItem(i));
-  if (bed) {
-    appState.human.x = Math.round(bed.x + bed.w / 2);
-    appState.human.y = Math.round(bed.y + (targetPosture === 'sit' ? bed.d * 0.78 : bed.d * 0.35));
-    appState.human.z = (bed.z || 0) + (bed.h || 55);
-    appState.human.rot = 180;
-  }
-  setHumanPosture(targetPosture);
-  enterHumanFPV();
-};
-
-function renderRightPanel() {
-  const container = document.getElementById("item-list-container");
-  document.getElementById("obj-count").innerText = `共 ${appState.items.length} 項`;
-  container.innerHTML = "";
-
-  const badgeMap = {
-    furniture: { text: "家具", cls: "" },
-    wall_item: { text: "🖼️ 牆物", cls: "win" },
-    door: { text: "🚪 門", cls: "door" },
-    window: { text: "🪟 窗", cls: "win" },
-    socket: { text: "🔌 插座", cls: "win" },
-    switch: { text: "💡 開關", cls: "win" }
-  };
-
-  appState.categories.forEach(cat => {
-    const catItems = appState.items.filter(it => (it.category || appState.categories[0]) === cat);
-    const sec = document.createElement("div");
-    sec.className = "cat-section";
-    sec.setAttribute("data-cat", cat);
-
-    sec.addEventListener("dragover", e => {
-      e.preventDefault();
-      sec.classList.add("drag-over");
-    });
-    sec.addEventListener("dragleave", () => sec.classList.remove("drag-over"));
-    sec.addEventListener("drop", e => {
-      e.preventDefault();
-      sec.classList.remove("drag-over");
-      if (draggedItemId) moveItemToCategory(draggedItemId, cat);
-    });
-
-    const isExpanded = expandedCategories.has(cat);
-    const header = document.createElement("div");
-    header.className = "cat-header";
-    header.innerHTML = `<span>${isExpanded ? '📂' : '📁'} ${cat} ${cat === '床' ? '🛏️' : ''}</span><span style="font-size:11px;color:#64748B;">${catItems.length} 項 ${isExpanded ? '▾' : '▸'}</span>`;
-
-    const listBox = document.createElement("div");
-    listBox.className = "cat-items";
-    listBox.style.display = isExpanded ? "flex" : "none";
-
-    header.onclick = () => {
-      if (expandedCategories.has(cat)) expandedCategories.delete(cat);
-      else expandedCategories.add(cat);
-      renderRightPanel();
-    };
-
-    catItems.forEach(item => {
-      const card = document.createElement("div");
-      card.className = "item-card" + (item.id === activeId ? " selected" : "");
-      card.draggable = true;
-      card.onclick = () => selectItemById(item.id);
-
-      card.addEventListener("dragstart", e => {
-        draggedItemId = item.id;
-        card.classList.add("dragging");
-        e.dataTransfer.setData("text/plain", item.id);
-      });
-      card.addEventListener("dragend", () => {
-        card.classList.remove("dragging");
-        draggedItemId = null;
-        document.querySelectorAll(".cat-section").forEach(s => s.classList.remove("drag-over"));
-      });
-
-      let touchTimer = null;
-      let isTouchDraggingCard = false;
-      card.addEventListener("touchstart", e => {
-        touchTimer = setTimeout(() => {
-          isTouchDraggingCard = true;
-          draggedItemId = item.id;
-          card.classList.add("dragging");
-        }, 280);
-      }, { passive: true });
-
-      card.addEventListener("touchmove", e => {
-        if (!isTouchDraggingCard) { clearTimeout(touchTimer); return; }
-        e.preventDefault();
-        const t = e.touches[0];
-        const elUnder = document.elementFromPoint(t.clientX, t.clientY);
-        document.querySelectorAll(".cat-section").forEach(s => s.classList.remove("drag-over"));
-        const targetSec = elUnder ? elUnder.closest(".cat-section") : null;
-        if (targetSec) targetSec.classList.add("drag-over");
-      }, { passive: false });
-
-      card.addEventListener("touchend", e => {
-        clearTimeout(touchTimer);
-        if (!isTouchDraggingCard) return;
-        isTouchDraggingCard = false;
-        card.classList.remove("dragging");
-        const t = e.changedTouches[0];
-        const elUnder = document.elementFromPoint(t.clientX, t.clientY);
-        const targetSec = elUnder ? elUnder.closest(".cat-section") : null;
-        document.querySelectorAll(".cat-section").forEach(s => s.classList.remove("drag-over"));
-        if (targetSec && targetSec.getAttribute("data-cat")) {
-          moveItemToCategory(item.id, targetSec.getAttribute("data-cat"));
-        }
-        draggedItemId = null;
-      });
-
-      const b = badgeMap[item.item_type || "furniture"] || badgeMap.furniture;
-      card.innerHTML = `
-        <div class="item-card-header">
-          <div class="name">
-            <span style="color:#64748B;font-size:11px;cursor:grab;">⠿</span>
-            <span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${item.color};border:1px solid #fff;"></span>
-            <span>${item.name}</span>
-            <span class="badge ${b.cls}">${b.text}</span>
-          </div>
-          <button class="card-del-btn" title="刪除" onclick="deleteItemById('${item.id}', event)">🗑️</button>
-        </div>
-        <div class="dims">
-          ${Math.round(item.w)}×${Math.round(item.d)}×${item.h || 30} | Z:${item.z || 0} | ${item.rot || 0}°
-        </div>
-      `;
-      listBox.appendChild(card);
-    });
-
-    sec.appendChild(header);
-    sec.appendChild(listBox);
-    container.appendChild(sec);
-  });
-}
-
-function highlightRightPanel() {
-  renderRightPanel();
-}
-
-function selectItemById(id) {
-  activeId = id;
-  if (currentMode === "2D") {
-    const group = canvas.getObjects().find(o => o.itemId === id);
-    if (group && !forcePanMode) {
-      canvas.setActiveObject(group);
-      canvas.requestRenderAll();
-    }
-  } else if (currentMode === "3D" && transformControl) {
-    const mesh = selectable3DMeshes.find(m => m.userData.itemId === id);
-    if (mesh) attachGizmoWithRules(mesh);
-  }
-  switchLeftTab('item');
-  updateLeftItemPanel();
-  highlightRightPanel();
-}
-
-function zoomToFit() {
-  if (!canvas) return;
-  const rw = appState.room.width, rd = appState.room.depth;
-  const container = document.getElementById("canvas-container");
-  const cw = container.clientWidth - 90, ch = container.clientHeight - 90;
-  const scale = Math.min(cw / rw, ch / rd, 1.65);
-  const offsetX = (container.clientWidth - rw * scale) / 2;
-  const offsetY = (container.clientHeight - rd * scale) / 2;
-  canvas.setViewportTransform([scale, 0, 0, scale, offsetX, offsetY]);
-  canvas.requestRenderAll();
-}
-
-document.getElementById("btn-zoom-fit").addEventListener("click", zoomToFit);
-document.getElementById("btn-zoom-in").addEventListener("click", () => canvas.setZoom(Math.min(canvas.getZoom() * 1.2, 5)));
-document.getElementById("btn-zoom-out").addEventListener("click", () => canvas.setZoom(Math.max(canvas.getZoom() / 1.2, 0.2)));
-document.getElementById("btn-pan-toggle").addEventListener("click", function() {
-  forcePanMode = !forcePanMode;
-  this.innerText = forcePanMode ? "✋ 平移: 開" : "✋ 平移: 關";
-  this.classList.toggle("active", forcePanMode);
-  renderFullScene();
-});
-
-document.getElementById("btn-save-local").addEventListener("click", () => {
-  localStorage.setItem("room_planner_v7", JSON.stringify(appState));
-  alert("✅ 已成功儲存於 App 本地記憶中！");
-});
-
-document.getElementById("btn-load-local").addEventListener("click", () => {
-  const saved = localStorage.getItem("room_planner_v7") || localStorage.getItem("room_planner_v6");
-  if (saved) {
-    appState = JSON.parse(saved);
-    if (!appState.categories) appState.categories = ["床", "大型家具", "收納櫃體", "門窗建材", "機電開關", "牆面裝飾"];
-    if (!appState.categories.includes("床")) appState.categories.unshift("床");
-    if (!appState.human) appState.human = { x: 230, y: 230, z: 0, height: 178, rot: 0, pitch: 0, posture: "stand", lock_horizontal: false };
-    appState.items.forEach(it => saveValidItemBackup(it));
-    renderCategoryUI();
-    initRoomFormValues();
-    initHumanFormValues();
-    syncLockScaleUI();
-    renderVoidListUI();
-    renderFullScene();
-    zoomToFit();
-    alert("✅ 已成功載入儲存的設計！");
-  } else {
-    alert("⚠️ 尚未找到本地存檔紀錄！");
-  }
-});
-
-document.getElementById("btn-export-file").addEventListener("click", () => {
-  const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(appState, null, 2));
-  const a = document.createElement('a');
-  a.setAttribute("href", dataStr);
-  a.setAttribute("download", "room_design_" + new Date().toISOString().slice(0, 10) + ".json");
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-});
-
-document.getElementById("file-import").addEventListener("change", function(e) {
-  const file = e.target.files[0];
-  if (!file) return;
-  const reader = new FileReader();
-  reader.onload = function(evt) {
-    try {
-      appState = JSON.parse(evt.target.result);
-      if (!appState.categories) appState.categories = ["床", "大型家具", "收納櫃體", "門窗建材", "機電開關", "牆面裝飾"];
-      if (!appState.categories.includes("床")) appState.categories.unshift("床");
-      if (!appState.human) appState.human = { x: 230, y: 230, z: 0, height: 178, rot: 0, pitch: 0, posture: "stand", lock_horizontal: false };
-      appState.items.forEach(it => saveValidItemBackup(it));
-      renderCategoryUI();
-      initRoomFormValues();
-      initHumanFormValues();
-      syncLockScaleUI();
-      renderVoidListUI();
-      renderFullScene();
-      zoomToFit();
-      alert("✅ 專案檔案載入成功！");
-    } catch(err) {
-      alert("❌ 檔案格式錯誤！");
-    }
-  };
-  reader.readAsText(file);
-});
-
-document.getElementById("btn-reset-default").addEventListener("click", () => {
-  if (confirm("確定要重置回附圖原始預設配置嗎？")) {
-    appState = JSON.parse(JSON.stringify(INITIAL_CONFIG));
-    appState.items.forEach(it => saveValidItemBackup(it));
-    renderCategoryUI();
-    initRoomFormValues();
-    initHumanFormValues();
-    syncLockScaleUI();
-    renderVoidListUI();
-    renderFullScene();
-    zoomToFit();
-  }
-});
-
-function initPanelResizers() {
-  const leftPanel = document.getElementById("left-panel");
-  const rightPanel = document.getElementById("right-panel");
-  const leftResizer = document.getElementById("left-resizer");
-  const rightResizer = document.getElementById("right-resizer");
-
-  let resizingSide = null;
-
-  const startResize = (side, e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    resizingSide = side;
-  };
-
-  if (leftResizer) leftResizer.addEventListener("pointerdown", e => startResize("left", e));
-  if (rightResizer) rightResizer.addEventListener("pointerdown", e => startResize("right", e));
-
-  window.addEventListener("pointermove", e => {
-    if (!resizingSide) return;
-    if (resizingSide === "left") {
-      const newW = Math.max(145, Math.min(window.innerWidth * 0.88, e.clientX));
-      leftPanel.style.width = newW + "px";
-    } else if (resizingSide === "right") {
-      const newW = Math.max(145, Math.min(window.innerWidth * 0.88, window.innerWidth - e.clientX));
-      rightPanel.style.width = newW + "px";
-    }
-    window.dispatchEvent(new Event("resize"));
-  });
-
-  window.addEventListener("pointerup", () => {
-    resizingSide = null;
-  });
-
-  document.querySelectorAll("input, select").forEach(el => {
-    el.addEventListener("focus", () => {
-      setTimeout(() => {
-        el.scrollIntoView({ behavior: "smooth", block: "center" });
-      }, 280);
-    });
-  });
-
-  const newCatSel = document.getElementById("new-obj-category");
-  if (newCatSel) newCatSel.addEventListener("change", window.onNewObjTypeChange);
-}
+  const disabledAttr
