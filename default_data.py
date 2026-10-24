@@ -32,6 +32,7 @@ FUJI_SVG = """data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' vi
 DEFAULT_ROOM = {
     "width": 460, "depth": 360, "height": 280,
     "editable": False,
+    "lock_scale": False,     # 鎖定既有物品縮放 (2D/3D同步)
     "show_walls": True,
     "show_ceiling": False,
     "wall_color": "#F8FAFC",
@@ -45,11 +46,13 @@ DEFAULT_HUMAN = {
     "height": 178,
     "rot": 0,
     "pitch": 0,
-    "posture": "stand"
+    "posture": "stand",
+    "lock_horizontal": False # 第一人稱僅水平轉動開關
 }
 
+# 八方座向初始位置設定於地基正中心 (width/2 = 230, depth/2 = 180)，且預設隨地基改變連動
 DEFAULT_COMPASS = {
-    "x": 255, "y": 185, "rotation": 0, "show": True,
+    "x": 230, "y": 180, "rotation": 0, "show": True, "auto_center": True,
     "show_feixing": False, "feixing_year": 2026
 }
 
@@ -57,8 +60,9 @@ DEFAULT_VOIDS = [
     {"id": "void_1", "name": "留白處 1", "x": 370, "y": 0, "w": 90, "d": 120}
 ]
 
-DEFAULT_CATEGORIES = ["床", "大型家具", "收納櫃體", "門窗建材", "機電開關"]
+DEFAULT_CATEGORIES = ["床", "大型家具", "收納櫃體", "門窗建材", "機電開關", "牆面裝飾"]
 
+# 窗戶與插座預設突出於南牆外側 (y = 360)，不佔用房間內部空間
 DEFAULT_ITEMS = [
     {"id": "bed", "name": "床", "category": "床", "item_type": "furniture", "x": 200, "y": 0, "z": 0, "w": 152, "d": 195, "h": 55, "rot": 0, "color": "#FAD785", "texture": "", "scenery": "", "flip_x": False, "flip_y": False},
     {"id": "stand_l", "name": "床頭櫃(左)", "category": "收納櫃體", "item_type": "furniture", "x": 175, "y": 0, "z": 0, "w": 25, "d": 40, "h": 45, "rot": 0, "color": "#FAD785", "texture": "", "scenery": "", "flip_x": False, "flip_y": False},
@@ -69,8 +73,8 @@ DEFAULT_ITEMS = [
     {"id": "wardrobe_white", "name": "白衣櫃", "category": "收納櫃體", "item_type": "furniture", "x": 275, "y": 305, "z": 0, "w": 60, "d": 55, "h": 190, "rot": 0, "color": "#AADE8D", "texture": "", "scenery": "", "flip_x": False, "flip_y": False},
     {"id": "wardrobe_old", "name": "舊衣櫃", "category": "收納櫃體", "item_type": "furniture", "x": 335, "y": 299, "z": 0, "w": 120, "d": 61, "h": 200, "rot": 0, "color": "#9EC484", "texture": "", "scenery": "", "flip_x": False, "flip_y": False},
     {"id": "bookcase", "name": "玻書櫃", "category": "收納櫃體", "item_type": "furniture", "x": 428, "y": 120, "z": 0, "w": 32, "d": 63, "h": 180, "rot": 0, "color": "#DC7CF5", "texture": "", "scenery": "", "flip_x": False, "flip_y": False},
-    {"id": "win_main", "name": "窗戶", "category": "門窗建材", "item_type": "window", "x": 35, "y": 348, "z": 85, "w": 135, "d": 12, "h": 130, "rot": 0, "color": "#F59E0B", "texture": "", "scenery": FUJI_SVG, "flip_x": False, "flip_y": False},
-    {"id": "socket_wall", "name": "插座", "category": "機電開關", "item_type": "socket", "x": 325, "y": 348, "z": 35, "w": 22, "d": 12, "h": 14, "rot": 0, "color": "#F97316", "texture": "", "scenery": "", "flip_x": False, "flip_y": False}
+    {"id": "win_main", "name": "窗戶", "category": "門窗建材", "item_type": "window", "x": 35, "y": 360, "z": 85, "w": 135, "d": 12, "h": 130, "rot": 0, "color": "#F59E0B", "texture": "", "scenery": FUJI_SVG, "flip_x": False, "flip_y": False, "wall": "south"},
+    {"id": "socket_wall", "name": "插座", "category": "機電開關", "item_type": "socket", "x": 325, "y": 360, "z": 35, "w": 22, "d": 12, "h": 14, "rot": 0, "color": "#F97316", "texture": "", "scenery": "", "flip_x": False, "flip_y": False, "wall": "south"}
 ]
 
 INITIAL_DATA = {
