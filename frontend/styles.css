@@ -3,12 +3,10 @@ input, select, textarea { user-select: text !important; -webkit-user-select: tex
 body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Microsoft JhengHei", sans-serif; background: #0E1117; color: #E0E0E0; overflow: hidden; touch-action: none; height: 100dvh; width: 100vw; }
 .app-container { display: flex; height: 100dvh; width: 100vw; position: relative; overflow: hidden; }
 
-/* 左右面板支援動態改變寬度與側邊拖曳拉桿 */
-.left-panel { width: 260px; min-width: 155px; max-width: 85vw; background: #16191E; border-right: 1px solid #282C34; display: flex; flex-direction: column; height: 100%; z-index: 30; position: relative; }
+.left-panel { width: 265px; min-width: 155px; max-width: 85vw; background: #16191E; border-right: 1px solid #282C34; display: flex; flex-direction: column; height: 100%; z-index: 30; position: relative; }
 .center-canvas { flex: 1; display: flex; flex-direction: column; position: relative; background: #090B0E; height: 100%; overflow: hidden; }
-.right-panel { width: 240px; min-width: 150px; max-width: 85vw; background: #16191E; border-left: 1px solid #282C34; padding: 10px; display: flex; flex-direction: column; height: 100%; z-index: 30; position: relative; }
+.right-panel { width: 245px; min-width: 150px; max-width: 85vw; background: #16191E; border-left: 1px solid #282C34; padding: 10px; display: flex; flex-direction: column; height: 100%; z-index: 30; position: relative; }
 
-/* 面板邊緣拖曳縮放拉桿 */
 .panel-resizer { position: absolute; top: 0; width: 14px; height: 100%; cursor: ew-resize; z-index: 45; display: flex; align-items: center; justify-content: center; touch-action: none; }
 .panel-resizer::after { content: "⋮"; color: #64748B; font-size: 14px; font-weight: bold; background: rgba(30,41,59,0.85); border-radius: 4px; padding: 6px 1px; border: 1px solid #334155; }
 .left-resizer { right: -7px; }
@@ -18,9 +16,14 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Micr
 .tab-btn { flex: 1; padding: 9px 2px; font-size: 11px; font-weight: 600; text-align: center; color: #8F96A0; cursor: pointer; border-bottom: 2px solid transparent; white-space: nowrap; }
 .tab-btn.active { color: #FFF; border-bottom: 2px solid #3B82F6; background: #16191E; }
 
-/* 解鎖手機垂直滾動 (pan-y) + 底部預留 55dvh 空間防止手機鍵盤擋住下方欄位 */
 .tab-content { padding: 10px 10px 55dvh 10px; flex: 1; overflow-y: auto; overflow-x: hidden; display: flex; flex-direction: column; gap: 8px; -webkit-overflow-scrolling: touch; touch-action: pan-y !important; }
 .tab-content * { touch-action: pan-y; }
+
+/* 左側折疊區塊樣式 */
+.collapse-box { background: #1A1E26; border: 1px solid #2E3440; border-radius: 8px; overflow: hidden; flex-shrink: 0; }
+.collapse-header { background: #202531; padding: 8px 10px; font-size: 12px; font-weight: 600; color: #93C5FD; display: flex; justify-content: space-between; align-items: center; cursor: pointer; user-select: none; }
+.collapse-header:hover { background: #283040; }
+.collapse-body { padding: 8px; display: none; flex-direction: column; gap: 6px; border-top: 1px solid #2E3440; }
 
 .toolbar { min-height: 46px; background: #16191E; border-bottom: 1px solid #282C34; display: flex; align-items: center; justify-content: space-between; padding: 4px 8px; z-index: 20; flex-wrap: wrap; gap: 5px; flex-shrink: 0; }
 .btn-group { display: flex; gap: 4px; align-items: center; flex-wrap: wrap; }
@@ -35,7 +38,6 @@ button.purple { background: #7C3AED; border-color: #7C3AED; }
 .field-group { display: flex; flex-direction: column; gap: 4px; margin-bottom: 4px; }
 .field-group label { font-size: 11px; color: #9AA0A6; font-weight: 500; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; }
 
-/* 全面改為直向排列，節省面板水平寬度 */
 .field-row { display: flex; flex-direction: column; gap: 5px; }
 .field-row > div { width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 6px; }
 .field-row > div > span { min-width: 48px; flex-shrink: 0; }
@@ -44,21 +46,6 @@ input[type="text"], input[type="number"], select { background: #0E1117; border: 
 input[type="text"]:focus, input[type="number"]:focus { border-color: #3B82F6; outline: none; }
 input[type="color"] { width: 100%; height: 28px; border: 1px solid #333842; border-radius: 4px; background: #0E1117; cursor: pointer; }
 
-/* 左側折疊區塊樣式 (預設收合) */
-.fold-section { background: #181C24; border: 1px solid #2B303C; border-radius: 8px; overflow: hidden; flex-shrink: 0; }
-.fold-header { background: #1F2430; padding: 8px 10px; font-size: 12px; font-weight: 600; color: #E2E8F0; display: flex; justify-content: space-between; align-items: center; cursor: pointer; user-select: none; transition: background 0.15s; }
-.fold-header:hover { background: #282F3E; }
-.fold-header.active { color: #93C5FD; border-bottom: 1px solid #2B303C; background: #1E293B; }
-.fold-body { padding: 8px; display: none; flex-direction: column; gap: 6px; }
-.fold-body.open { display: flex; }
-
-/* 前五次使用顏色色票列 */
-.recent-colors-row { display: flex; align-items: center; gap: 5px; margin-top: 3px; flex-wrap: wrap; }
-.recent-colors-label { font-size: 10px; color: #94A3B8; margin-right: 2px; }
-.color-swatch-btn { width: 20px; height: 20px; border-radius: 4px; border: 1.5px solid #CBD5E1; cursor: pointer; padding: 0; transition: transform 0.12s, border-color 0.12s; flex-shrink: 0; }
-.color-swatch-btn:hover { transform: scale(1.15); border-color: #FFFFFF; }
-
-.quick-add-box { background: #1C2029; border: 1px solid #2E3440; border-radius: 8px; padding: 8px; display: flex; flex-direction: column; gap: 6px; }
 .quick-add-sub { display: flex; flex-direction: column; gap: 4px; }
 
 .item-list { display: flex; flex-direction: column; gap: 6px; margin-top: 4px; padding-bottom: 45dvh; flex: 1; overflow-y: auto; padding-right: 2px; -webkit-overflow-scrolling: touch; touch-action: pan-y !important; }
@@ -79,7 +66,6 @@ input[type="color"] { width: 100%; height: 28px; border: 1px solid #333842; bord
 .view-controls { position: absolute; top: 52px; left: 8px; display: flex; gap: 4px; z-index: 15; background: rgba(22,25,30,0.9); padding: 4px; border-radius: 8px; border: 1px solid #282C34; flex-wrap: wrap; max-width: calc(100vw - 16px); }
 .view-controls button { padding: 4px 7px; font-size: 11px; }
 
-/* 全新袖珍型第一人稱控制框 */
 .fpv-hud {
   position: absolute;
   bottom: 58px;
@@ -119,7 +105,6 @@ input[type="color"] { width: 100%; height: 28px; border: 1px solid #333842; bord
 .dpad-compact { display: grid; grid-template-columns: repeat(3, 28px); gap: 3px; justify-content: center; }
 .dpad-compact button { height: 26px; font-size: 11px; padding: 0; border-radius: 5px; touch-action: none; }
 
-/* 右下角無段縮放拉柄 */
 .fpv-resizer {
   position: absolute;
   right: 1px;
@@ -136,34 +121,31 @@ input[type="color"] { width: 100%; height: 28px; border: 1px solid #333842; bord
   touch-action: none;
 }
 
-/* 修正拖曳刪除區：移至最上方工具列右側 (完全不佔用畫布與房間內部空間) */
+/* 垃圾桶刪除區移至右上角工具列旁小區塊，絕不佔用室內設計畫布空間 */
 .trash-dropzone {
   position: absolute;
-  top: 4px;
-  right: 10px;
-  left: auto;
-  bottom: auto;
-  transform: scale(0.9);
+  top: 52px;
+  right: 12px;
+  transform: scale(0.85);
   opacity: 0;
   pointer-events: none;
-  z-index: 45;
-  background: rgba(185, 28, 28, 0.96);
+  z-index: 40;
+  background: rgba(185, 28, 28, 0.92);
   border: 2px dashed #FCA5A5;
   color: #FFF;
-  padding: 5px 14px;
+  padding: 6px 12px;
   border-radius: 20px;
   font-size: 11px;
   font-weight: bold;
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: 4px;
   transition: all 0.18s ease;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.45);
 }
 .trash-dropzone.show { opacity: 1; transform: scale(1); pointer-events: auto; }
-.trash-dropzone.hover { background: #EF4444; transform: scale(1.06); border-color: #FFF; }
+.trash-dropzone.hover { background: #EF4444; transform: scale(1.08); border-color: #FFF; }
 
-.toast-msg { position: absolute; top: 90px; left: 50%; transform: translateX(-50%); background: rgba(30, 41, 59, 0.95); border: 1px solid #3B82F6; color: #FFF; padding: 6px 14px; border-radius: 20px; font-size: 11px; font-weight: 600; z-index: 35; opacity: 0; pointer-events: none; transition: opacity 0.2s; }
+.toast-msg { position: absolute; top: 90px; left: 50%; transform: translateX(-50%); background: rgba(30, 41, 59, 0.95); border: 1px solid #3B82F6; color: #FFF; padding: 5px 12px; border-radius: 20px; font-size: 11px; font-weight: 600; z-index: 35; opacity: 0; pointer-events: none; transition: opacity 0.2s; }
 .toast-msg.show { opacity: 1; }
 
 #canvas-container, #three-container { width: 100%; height: calc(100% - 46px); position: absolute; top: 46px; left: 0; touch-action: none; }
