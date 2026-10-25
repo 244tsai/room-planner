@@ -1,73 +1,46 @@
-const STORAGE_KEY_PRIMARY = "home_design_planner_v12";
-const STORAGE_KEYS_LEGACY = ["home_design_planner_v12", "home_design_v11_saved"];
+const STORAGE_KEY_PRIMARY = "home_design_v12_saved";
+const STORAGE_KEYS_LEGACY = [
+  "home_design_v12_saved", "room_planner_v11_saved", "room_planner_v10_saved",
+  "room_planner_v9", "room_planner_v8", "room_planner_v7"
+];
 
-function bindEventSafe(id, evtName, handler) {
-  const el = document.getElementById(id);
-  if (el) el.addEventListener(evtName, handler);
-}
-
-function readStorageItem(key) {
-  try {
-    if (window.parent && window.parent.localStorage) {
-      const v = window.parent.localStorage.getItem(key);
-      if (v) return v;
-    }
-  } catch (e) {}
-  try {
-    return localStorage.getItem(key);
-  } catch (e) {
-    return null;
+function getHomeDesign(state) {
+  if (!state) return null;
+  if (state.home_design) return state.home_design;
+  if (state.room) {
+    state.home_design = state.room;
+    return state.home_design;
   }
-}
-
-function writeStorageItem(key, val) {
-  let ok = false;
-  try {
-    if (window.parent && window.parent.localStorage) {
-      window.parent.localStorage.setItem(key, val);
-      ok = true;
-    }
-  } catch (e) {}
-  try {
-    localStorage.setItem(key, val);
-    ok = true;
-  } catch (e) {}
-  return ok;
-}
-
-function removeStorageItem(key) {
-  try {
-    if (window.parent && window.parent.localStorage) {
-      window.parent.localStorage.removeItem(key);
-    }
-  } catch (e) {}
-  try {
-    localStorage.removeItem(key);
-  } catch (e) {}
+  return null;
 }
 
 function loadInitialAppState() {
   for (let i = 0; i < STORAGE_KEYS_LEGACY.length; i++) {
     try {
-      const raw = readStorageItem(STORAGE_KEYS_LEGACY[i]);
+      const raw = localStorage.getItem(STORAGE_KEYS_LEGACY[i]);
       if (raw) {
         const parsed = JSON.parse(raw);
-        if (parsed && Array.isArray(parsed.items)) {
+        if (parsed && (parsed.home_design || parsed.room) && Array.isArray(parsed.items)) {
           parsed.default_fuji = INITIAL_CONFIG.default_fuji;
           return parsed;
         }
       }
     } catch (e) {
-      console.warn("讀取儲存記錄失敗:", e);
+      console.warn("讀取 localStorage 失敗:", e);
     }
   }
   return JSON.parse(JSON.stringify(INITIAL_CONFIG));
 }
 
 function normalizeAppState(state) {
-  if (!state.home_design) {
-    state.home_design = JSON.parse(JSON.stringify(INITIAL_CONFIG.home_design));
+  let hd = getHomeDesign(state);
+  if (!hd) {
+    hd = { width: 460, depth: 360, height: 280, editable: false, lock_scale: false, auto_save: false, show_walls: true, show_ceiling: false, wall_color: "#F8FAFC", ceiling_color: "#FFFFFF" };
+    state.home_design = hd;
   }
+  // 雙向相容
+  state.room = hd;
+
   if (!state.voids && state.void) {
     state.voids = [{ id: "void_1", name: "留白處 1", x: state.void.x, y: state.void.y, w: state.void.w, d: state.void.d }];
   }
@@ -93,15 +66,15 @@ function normalizeAppState(state) {
     lock_horizontal: false, fov_h: 100, fov_up: 50, fov_down: 65
   }, state.human);
 
-  if (state.home_design.show_walls === undefined) state.home_design.show_walls = true;
-  if (state.home_design.show_ceiling === undefined) state.home_design.show_ceiling = false;
-  if (state.home_design.lock_scale === undefined) state.home_design.lock_scale = false;
-  if (state.home_design.auto_save === undefined) state.home_design.auto_save = false;
+  if (hd.show_walls === undefined) hd.show_walls = true;
+  if (hd.show_ceiling === undefined) hd.show_ceiling = false;
+  if (hd.lock_scale === undefined) hd.lock_scale = false;
+  if (hd.auto_save === undefined) hd.auto_save = false;
   if (state.compass.auto_center === undefined) state.compass.auto_center = true;
 
   if (state.compass.auto_center) {
-    state.compass.x = Math.round(state.home_design.width / 2);
-    state.compass.y = Math.round(state.home_design.depth / 2);
+    state.compass.x = Math.round(hd.width / 2);
+    state.compass.y = Math.round(hd.depth / 2);
   }
   state.default_fuji = INITIAL_CONFIG.default_fuji;
 }
@@ -110,12 +83,16 @@ let appState = loadInitialAppState();
 normalizeAppState(appState);
 
 function persistAppStateToLocal(isAutoTrigger = false) {
-  if (isAutoTrigger && !appState.home_design.auto_save) return;
-  const serialized = JSON.stringify(appState);
-  const ok = writeStorageItem(STORAGE_KEY_PRIMARY, serialized);
-  if (!isAutoTrigger) {
-    if (ok) showToast("💾 室內設計已成功儲存於 App 中！");
-    else alert("⚠️ 儲存失敗，請檢查自訂材質貼圖大小！");
+  const hd = getHomeDesign(appState);
+  if (isAutoTrigger && !hd.auto_save) return;
+  try {
+    const serialized = JSON.stringify(appState);
+    localStorage.setItem(STORAGE_KEY_PRIMARY, serialized);
+    if (!isAutoTrigger) {
+      showToast("💾 設計已成功儲存於 App 中！");
+    }
+  } catch (e) {
+    if (!isAutoTrigger) alert("⚠️ 儲存失敗，請檢查材質貼圖大小！");
   }
 }
 
@@ -234,7 +211,7 @@ function hasAnyCollision(item) {
     if (other.id === item.id) continue;
     if (isTwoItemsOverlapping(item, other)) return other;
   }
-  for (let i = 0; i < appState.voids.length; i++) {
+  for (let i = 0; i < (appState.voids || []).length; i++) {
     const v = appState.voids[i];
     if (isItemOverlappingVoid(item, v)) {
       return { isVoid: true, name: v.name };
@@ -298,9 +275,10 @@ function renderRecentColorsPalette() {
 }
 
 function enforceItemConstraints(item, mode = "move", showMsg = false) {
-  const rw = appState.home_design.width;
-  const rd = appState.home_design.depth;
-  const rh = appState.home_design.height;
+  const hd = getHomeDesign(appState);
+  const rw = hd.width;
+  const rd = hd.depth;
+  const rh = hd.height;
   const t = item.item_type || "furniture";
   const prev = lastValidItemMap[item.id] || { x: item.x, y: item.y, z: item.z || 0, w: item.w, d: item.d, h: item.h || 30, seat_h: item.seat_h || 45, rot: item.rot || 0 };
 
@@ -372,7 +350,7 @@ function enforceItemConstraints(item, mode = "move", showMsg = false) {
         else if (maxOverRatio === overRightRatio) item.x = Math.round(rw + gap + (bw - item.w) / 2);
         else if (maxOverRatio === overTopRatio) item.y = Math.round(-bd - gap + (bd - item.d) / 2);
         else item.y = Math.round(rd + gap + (bd - item.d) / 2);
-        if (showMsg) showToast("📦 超過牆壁 3/4，已移至外側備用區！");
+        if (showMsg) showToast("📦 超過邊界 3/4，已移至室外備用區！");
       } else {
         if (mode === "scale") {
           if (box.x0 < 0 || box.x1 > rw) item.w = prev.w;
@@ -392,11 +370,7 @@ function enforceItemConstraints(item, mode = "move", showMsg = false) {
   let hitOther = hasAnyCollision(item);
   if (hitOther) {
     if (hitOther.isVoid) {
-      item.x = prev.x;
-      item.y = prev.y;
-      item.w = prev.w;
-      item.d = prev.d;
-      item.rot = prev.rot;
+      item.x = prev.x; item.y = prev.y; item.w = prev.w; item.d = prev.d; item.rot = prev.rot;
       if (showMsg) showToast(`⛔ 留白處「${hitOther.name}」無法擺設物件！`);
     } else if (mode === "scale") {
       item.w = prev.w; item.d = prev.d; item.h = prev.h;
@@ -440,12 +414,13 @@ function enforceItemConstraints(item, mode = "move", showMsg = false) {
 }
 
 function findNonOverlappingSpot(newItem) {
+  const hd = getHomeDesign(appState);
   saveValidItemBackup(newItem);
   if (!hasAnyCollision(newItem)) {
     enforceItemConstraints(newItem, "move", false);
     return;
   }
-  const rw = appState.home_design.width, rd = appState.home_design.depth;
+  const rw = hd.width, rd = hd.depth;
   for (let y = 10; y <= rd - newItem.d - 10; y += 20) {
     for (let x = 10; x <= rw - newItem.w - 10; x += 20) {
       newItem.x = x; newItem.y = y;
@@ -461,11 +436,12 @@ function findNonOverlappingSpot(newItem) {
 }
 
 function checkHumanWalkable(nx, ny) {
+  const hd = getHomeDesign(appState);
   const isSittingBedEdge = (appState.human.posture === "sit" && appState.human.sit_mode === "bed_edge");
   const radius = isSittingBedEdge ? 2 : 12;
-  const rw = appState.home_design.width, rd = appState.home_design.depth;
+  const rw = hd.width, rd = hd.depth;
 
-  if (appState.home_design.show_walls) {
+  if (hd.show_walls) {
     const wallPad = isSittingBedEdge ? 2 : radius;
     if (nx < wallPad || nx > rw - wallPad || ny < wallPad || ny > rd - wallPad) {
       return { allowed: false, baseZ: appState.human.z || 0 };
@@ -677,7 +653,7 @@ window.sitOnSelectedChair = function(explicitChairId) {
   let chair = appState.items.find(i => i.id === targetChairId && isChairItem(i));
   if (!chair) chair = appState.items.find(i => isChairItem(i));
   if (!chair) {
-    showToast("💡 室內設計空間內尚無椅子，請先新增椅子！");
+    showToast("💡 尚無椅子，請先新增椅子！");
     return;
   }
 
@@ -703,7 +679,7 @@ window.sitOnSelectedChair = function(explicitChairId) {
   if (currentMode === "3D" && renderer) updateThreeScene();
   else if (currentMode === "FPV") { updateThreeScene(); syncFPVCamera(); }
   persistAppStateToLocal(true);
-  showToast(`🪑 已入座「${chair.name}」(貼齊椅背、面向正前方)`);
+  showToast(`🪑 已坐在「${chair.name}」(背靠椅背)`);
 };
 
 window.onHudChairSelectChange = function() {
@@ -718,7 +694,7 @@ window.onHudChairSelectChange = function() {
 window.rotateActiveItemBy = function(deltaDeg) {
   const item = appState.items.find(i => i.id === activeId);
   if (!item) {
-    showToast("💡 請先選取要旋轉的椅子或家具！");
+    showToast("💡 請先選取要旋轉的家具！");
     return;
   }
   item.rot = Math.round((((item.rot || 0) + deltaDeg) % 360 + 360) % 360);
@@ -778,14 +754,14 @@ window.toggleSectionCollapse = function(bodyId, iconId) {
   const ic = document.getElementById(iconId);
   if (!el) return;
   const isHidden = (el.style.display === "none");
-  el.style.display = isHidden ? "flex" : "none";
+  el.style.display = isHidden ? "block" : "none";
   if (ic) ic.innerText = isHidden ? "▾" : "▸";
 };
 
 window.openSectionCollapse = function(bodyId, iconId) {
   const el = document.getElementById(bodyId);
   const ic = document.getElementById(iconId);
-  if (el) el.style.display = "flex";
+  if (el) el.style.display = "block";
   if (ic) ic.innerText = "▾";
 };
 
@@ -815,16 +791,22 @@ function getStarAtDir(centerStar, dirKey) {
 function toggleMobilePanel(target) {
   const lp = document.getElementById("left-panel");
   const rp = document.getElementById("right-panel");
-  document.getElementById("mnav-left").classList.toggle("active", target === 'left');
-  document.getElementById("mnav-right").classList.toggle("active", target === 'right');
-  document.getElementById("mnav-canvas").classList.toggle("active", target === 'canvas');
+  const mLeft = document.getElementById("mnav-left");
+  const mRight = document.getElementById("mnav-right");
+  const mCanvas = document.getElementById("mnav-canvas");
+  if (mLeft) mLeft.classList.toggle("active", target === 'left');
+  if (mRight) mRight.classList.toggle("active", target === 'right');
+  if (mCanvas) mCanvas.classList.toggle("active", target === 'canvas');
 
   if (target === 'left') {
-    lp.classList.toggle("open"); rp.classList.remove("open");
+    if (lp) lp.classList.toggle("open");
+    if (rp) rp.classList.remove("open");
   } else if (target === 'right') {
-    rp.classList.toggle("open"); lp.classList.remove("open");
+    if (rp) rp.classList.toggle("open");
+    if (lp) lp.classList.remove("open");
   } else {
-    lp.classList.remove("open"); rp.classList.remove("open");
+    if (lp) lp.classList.remove("open");
+    if (rp) rp.classList.remove("open");
   }
 }
 
@@ -838,14 +820,16 @@ function switchLeftTab(tab) {
 }
 
 window.toggleLockScaleBtn = function() {
-  appState.home_design.lock_scale = !appState.home_design.lock_scale;
+  const hd = getHomeDesign(appState);
+  hd.lock_scale = !hd.lock_scale;
   syncLockScaleUI();
   renderFullScene();
   persistAppStateToLocal(true);
 };
 
 function syncLockScaleUI() {
-  const locked = !!appState.home_design.lock_scale;
+  const hd = getHomeDesign(appState);
+  const locked = !!hd.lock_scale;
   const chk = document.getElementById("lock-scale-chk");
   if (chk) chk.checked = locked;
   const b2d = document.getElementById("btn-lock-scale-2d");
@@ -917,7 +901,8 @@ function moveItemToCategory(itemId, targetCat) {
 
 window.addCategory = function() {
   const inp = document.getElementById("new-cat-input");
-  const val = inp ? inp.value.trim() : "";
+  if (!inp) return;
+  const val = inp.value.trim();
   if (!val) return;
   if (!appState.categories.includes(val)) {
     appState.categories.push(val);
@@ -1006,9 +991,11 @@ function bindDpadBtn(btnId, rightVal, forwardVal) {
 
 function initFabric() {
   const container = document.getElementById("canvas-container");
+  if (!container) return;
+
   canvas = new fabric.Canvas('fabric-canvas', {
-    width: container.clientWidth,
-    height: container.clientHeight,
+    width: container.clientWidth || 800,
+    height: container.clientHeight || 600,
     backgroundColor: '#0A0C10',
     selection: false,
     preserveObjectStacking: true
@@ -1021,19 +1008,24 @@ function initFabric() {
   bindDpadBtn("dpad-left", -1, 0);
   bindDpadBtn("dpad-right", 1, 0);
 
-  bindEventSafe("lock-scale-chk", "change", e => {
-    appState.home_design.lock_scale = e.target.checked;
-    syncLockScaleUI();
-    renderFullScene();
-    persistAppStateToLocal(true);
-  });
+  const lockScaleChk = document.getElementById("lock-scale-chk");
+  if (lockScaleChk) {
+    lockScaleChk.addEventListener("change", e => {
+      const hd = getHomeDesign(appState);
+      hd.lock_scale = e.target.checked;
+      syncLockScaleUI();
+      renderFullScene();
+      persistAppStateToLocal(true);
+    });
+  }
 
   const autoSaveChk = document.getElementById("auto-save-chk");
   if (autoSaveChk) {
-    autoSaveChk.checked = !!appState.home_design.auto_save;
+    const hd = getHomeDesign(appState);
+    autoSaveChk.checked = !!hd.auto_save;
     autoSaveChk.addEventListener("change", e => {
-      appState.home_design.auto_save = e.target.checked;
-      showToast(appState.home_design.auto_save ? "✅ 已開啟自動儲存" : "ℹ️ 已切換為手動儲存模式");
+      hd.auto_save = e.target.checked;
+      showToast(hd.auto_save ? "✅ 已開啟自動儲存" : "ℹ️ 已切換為手動儲存模式");
       persistAppStateToLocal(false);
     });
   }
@@ -1050,7 +1042,8 @@ function initFabric() {
   canvas.on('mouse:down', function(opt) {
     const evt = opt.e;
     const target = opt.target;
-    const isSelectable = target && (target.itemId || target.isHuman || (target.voidId && appState.home_design.editable));
+    const hd = getHomeDesign(appState);
+    const isSelectable = target && (target.itemId || target.isHuman || (target.voidId && hd.editable));
 
     if (!isSelectable || forcePanMode || evt.button === 1 || evt.altKey) {
       isDraggingCanvas = true;
@@ -1086,24 +1079,26 @@ function initFabric() {
   });
 
   const upperCanvas = canvas.upperCanvasEl;
-  upperCanvas.addEventListener('touchstart', function(e) {
-    if (e.touches.length === 2) {
-      isDraggingCanvas = false;
-      touchStartDist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
-      touchStartZoom = canvas.getZoom();
-    }
-  }, { passive: false });
+  if (upperCanvas) {
+    upperCanvas.addEventListener('touchstart', function(e) {
+      if (e.touches.length === 2) {
+        isDraggingCanvas = false;
+        touchStartDist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
+        touchStartZoom = canvas.getZoom();
+      }
+    }, { passive: false });
 
-  upperCanvas.addEventListener('touchmove', function(e) {
-    if (e.touches.length === 2 && touchStartDist > 0) {
-      e.preventDefault();
-      const dist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
-      let newZoom = Math.min(Math.max(touchStartZoom * (dist / touchStartDist), 0.2), 4.5);
-      const cx = (e.touches[0].clientX + e.touches[1].clientX) / 2;
-      const cy = (e.touches[0].clientY + e.touches[1].clientY) / 2;
-      canvas.zoomToPoint({ x: cx, y: cy }, newZoom);
-    }
-  }, { passive: false });
+    upperCanvas.addEventListener('touchmove', function(e) {
+      if (e.touches.length === 2 && touchStartDist > 0) {
+        e.preventDefault();
+        const dist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
+        let newZoom = Math.min(Math.max(touchStartZoom * (dist / touchStartDist), 0.2), 4.5);
+        const cx = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+        const cy = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+        canvas.zoomToPoint({ x: cx, y: cy }, newZoom);
+      }
+    }, { passive: false });
+  }
 
   canvas.on('selection:created', onObjectSelected);
   canvas.on('selection:updated', onObjectSelected);
@@ -1131,7 +1126,7 @@ function initFabric() {
   renderCategoryUI();
   renderChairSelectOptions();
   renderRecentColorsPalette();
-  initHomeDesignFormValues();
+  initRoomFormValues();
   initHumanFormValues();
   syncLockScaleUI();
   renderVoidListUI();
@@ -1146,7 +1141,8 @@ function renderFullScene() {
   canvas.clear();
   canvas.backgroundColor = '#0A0C10';
 
-  const rw = appState.home_design.width, rd = appState.home_design.depth;
+  const hd = getHomeDesign(appState);
+  const rw = hd.width || 460, rd = hd.depth || 360;
 
   canvas.add(new fabric.Rect({
     left: 0, top: 0, width: rw, height: rd,
@@ -1161,8 +1157,8 @@ function renderFullScene() {
     left: -24, top: rd / 2, fontSize: 13, fill: '#94A3B8', originX: 'center', angle: -90, selectable: false, evented: false
   }));
 
-  const canEditGround = !!appState.home_design.editable && !forcePanMode;
-  appState.voids.forEach(v => {
+  const canEditGround = !!hd.editable && !forcePanMode;
+  (appState.voids || []).forEach(v => {
     const vRect = new fabric.Rect({
       width: v.w, height: v.d, fill: '#FFFFFF',
       stroke: canEditGround ? '#2563EB' : '#CBD5E1',
@@ -1292,7 +1288,8 @@ function createFabricItem(item) {
   });
   subElements.push(text);
 
-  const lockS = !!appState.home_design.lock_scale;
+  const hd = getHomeDesign(appState);
+  const lockS = !!hd.lock_scale;
   const group = new fabric.Group(subElements, {
     left: item.x + item.w / 2, top: item.y + item.d / 2,
     angle: item.rot || 0, originX: 'center', originY: 'center',
@@ -1319,7 +1316,8 @@ function createFabricItem(item) {
 }
 
 function renderNinePalaceFeixing() {
-  const rw = appState.home_design.width, rd = appState.home_design.depth;
+  const hd = getHomeDesign(appState);
+  const rw = hd.width, rd = hd.depth;
   const cw = rw / 3, cd = rd / 3;
   const year = parseInt(appState.compass.feixing_year) || 2026;
   const centerStar = getCenterStarByYear(year);
@@ -1371,7 +1369,8 @@ function renderNinePalaceFeixing() {
 function renderExpertCompass() {
   const cx = appState.compass.x, cy = appState.compass.y;
   const rot = appState.compass.rotation || 0;
-  const radius = Math.max(appState.home_design.width, appState.home_design.depth) * 0.72;
+  const hd = getHomeDesign(appState);
+  const radius = Math.max(hd.width, hd.depth) * 0.72;
 
   [radius * 0.25, radius * 0.5, radius * 0.75, radius].forEach((r, idx) => {
     canvas.add(new fabric.Circle({
@@ -1432,7 +1431,7 @@ function onObjectSelected(e) {
     updateLeftItemPanel();
     highlightRightPanel();
   } else if (target.voidId) {
-    switchLeftTab('home-design');
+    switchLeftTab('room');
   }
 }
 
@@ -1482,7 +1481,8 @@ function onObjectLiveTransform(e, mode) {
     }
 
     const baseRect = target.item(0);
-    if (mode === "scale" && !appState.home_design.lock_scale) {
+    const hd = getHomeDesign(appState);
+    if (mode === "scale" && !hd.lock_scale) {
       item.w = Math.max(4, Math.round(baseRect.width * Math.abs(target.scaleX)));
       item.d = Math.max(4, Math.round(baseRect.height * Math.abs(target.scaleY)));
     }
@@ -1510,7 +1510,7 @@ function onObjectLiveTransform(e, mode) {
     updateLeftItemPanel();
 
   } else if (target.voidId) {
-    const v = appState.voids.find(x => x.id === target.voidId);
+    const v = (appState.voids || []).find(x => x.id === target.voidId);
     if (!v) return;
     const baseRect = target.item(0);
     v.w = Math.max(10, Math.round(baseRect.width * Math.abs(target.scaleX)));
@@ -1552,10 +1552,10 @@ function updateLeftItemPanel() {
   if (propEd) propEd.style.display = "block";
 
   const typeNames = {
-    furniture: "🛋️ 家具 / 床組 (貼地)",
+    furniture: "🛋️ 家具 / 床 (貼地)",
     chair: "🪑 椅子 (可設坐墊高)",
     wall_item: "🖼️ 牆壁上物品 (貼牆可調Z)",
-    door: "🚪 門扇 (貼牆貼地)",
+    door: "🚪 房門 (貼牆貼地)",
     window: "🪟 窗戶 (貼牆外突)",
     socket: "🔌 插座 (貼牆外突)",
     switch: "💡 開關 (貼牆外突)"
@@ -1581,14 +1581,17 @@ function updateLeftItemPanel() {
   setInputValueSafe("prop-color", item.color);
   setInputValueSafe("prop-stroke-color", item.stroke_color || "#1E293B");
 
-  const lockS = !!appState.home_design.lock_scale;
-  ["prop-w", "prop-d", "prop-h"].forEach(id => {
-    const el = document.getElementById(id);
-    if (el) el.disabled = lockS;
-  });
+  const hd = getHomeDesign(appState);
+  const lockS = !!hd.lock_scale;
+  const pw = document.getElementById("prop-w");
+  const pd = document.getElementById("prop-d");
+  const ph = document.getElementById("prop-h");
+  if (pw) pw.disabled = lockS;
+  if (pd) pd.disabled = lockS;
+  if (ph) ph.disabled = lockS;
 
-  const shRow = document.getElementById("prop-seath-row");
-  if (shRow) shRow.style.display = (t === "chair") ? "flex" : "none";
+  const seathRow = document.getElementById("prop-seath-row");
+  if (seathRow) seathRow.style.display = (t === "chair") ? "flex" : "none";
 
   const canZ = isZAdjustableWallType(t);
   const zRow = document.getElementById("prop-z-row");
@@ -1596,10 +1599,10 @@ function updateLeftItemPanel() {
   if (zRow) zRow.style.display = canZ ? "flex" : "none";
   if (zHint) zHint.style.display = canZ ? "inline" : "none";
 
-  const doorGrp = document.getElementById("door-swing-group");
-  const scenGrp = document.getElementById("scenery-upload-group");
-  if (doorGrp) doorGrp.style.display = (t === "door") ? "flex" : "none";
-  if (scenGrp) scenGrp.style.display = (t === "window") ? "flex" : "none";
+  const dSwing = document.getElementById("door-swing-group");
+  const sUpload = document.getElementById("scenery-upload-group");
+  if (dSwing) dSwing.style.display = (t === "door") ? "flex" : "none";
+  if (sUpload) sUpload.style.display = (t === "window") ? "flex" : "none";
 }
 
 function updateSingleItemVisual(item, mode = "move") {
@@ -1618,6 +1621,8 @@ function updateSingleItemVisual(item, mode = "move") {
 
     const rawVal = el.value;
     let mode = "move";
+    const hd = getHomeDesign(appState);
+
     if (id === "prop-name") item.name = rawVal;
     else if (id === "prop-category") {
       item.category = rawVal;
@@ -1635,918 +1640,4 @@ function updateSingleItemVisual(item, mode = "move") {
       item.color = rawVal;
       recordRecentColor(rawVal);
     } else if (id === "prop-stroke-color") {
-      item.stroke_color = rawVal;
-      recordRecentColor(rawVal);
-    } else {
-      if (rawVal === "" || rawVal === "-") return;
-      const num = parseFloat(rawVal);
-      if (isNaN(num)) return;
-      if (id === "prop-w" && !appState.home_design.lock_scale) { item.w = Math.max(1, num); mode = "scale"; }
-      if (id === "prop-d" && !appState.home_design.lock_scale) { item.d = Math.max(1, num); mode = "scale"; }
-      if (id === "prop-h" && !appState.home_design.lock_scale) { item.h = Math.max(1, Math.min(appState.home_design.height, num)); mode = "scale"; }
-      if (id === "prop-seath") { item.seat_h = Math.max(10, Math.min(item.h - 5, num)); }
-      if (id === "prop-x") item.x = num;
-      if (id === "prop-y") item.y = num;
-      if (id === "prop-z" && isZAdjustableWallType(item.item_type)) item.z = Math.max(0, num);
-      if (id === "prop-rot") {
-        item.rot = ((num % 360) + 360) % 360;
-        mode = "rotate";
-      }
-    }
-
-    if (isFinalCommit) {
-      updateSingleItemVisual(item, mode);
-    } else {
-      if (canvas) {
-        const fabricObj = canvas.getObjects().find(o => o.itemId === item.id);
-        if (fabricObj) {
-          fabricObj.set({ left: item.x + item.w / 2, top: item.y + item.d / 2, angle: item.rot || 0 });
-          canvas.requestRenderAll();
-        }
-      }
-    }
-  };
-
-  el.addEventListener("input", () => handleValChange(false));
-  el.addEventListener("change", () => handleValChange(true));
-  el.addEventListener("blur", () => handleValChange(true));
-});
-
-bindEventSafe("prop-rot-slider", "input", e => {
-  const item = appState.items.find(i => i.id === activeId);
-  if (!item) return;
-  item.rot = parseFloat(e.target.value) || 0;
-  updateSingleItemVisual(item, "rotate");
-});
-
-bindEventSafe("btn-door-flip-x", "click", () => {
-  const item = appState.items.find(i => i.id === activeId);
-  if (!item) return;
-  item.flip_x = !item.flip_x;
-  persistAppStateToLocal(true);
-  renderFullScene();
-});
-bindEventSafe("btn-door-flip-y", "click", () => {
-  const item = appState.items.find(i => i.id === activeId);
-  if (!item) return;
-  item.flip_y = !item.flip_y;
-  persistAppStateToLocal(true);
-  renderFullScene();
-});
-
-bindEventSafe("prop-scenery-file", "change", function(e) {
-  const file = e.target.files[0];
-  if (!file) return;
-  const reader = new FileReader();
-  reader.onload = function(f) {
-    const item = appState.items.find(i => i.id === activeId);
-    if (!item) return;
-    item.scenery = f.target.result;
-    persistAppStateToLocal(true);
-    if (renderer) updateThreeScene();
-  };
-  reader.readAsDataURL(file);
-});
-
-bindEventSafe("btn-reset-fuji", "click", () => {
-  const item = appState.items.find(i => i.id === activeId);
-  if (!item) return;
-  item.scenery = appState.default_fuji;
-  persistAppStateToLocal(true);
-  if (renderer) updateThreeScene();
-});
-
-bindEventSafe("prop-texture-file", "change", function(e) {
-  const file = e.target.files[0];
-  if (!file) return;
-  const reader = new FileReader();
-  reader.onload = function(f) {
-    const item = appState.items.find(i => i.id === activeId);
-    if (!item) return;
-    item.texture = f.target.result;
-    persistAppStateToLocal(true);
-    renderFullScene();
-    if (renderer) updateThreeScene();
-  };
-  reader.readAsDataURL(file);
-});
-
-bindEventSafe("btn-clear-texture", "click", () => {
-  const item = appState.items.find(i => i.id === activeId);
-  if (!item) return;
-  item.texture = "";
-  persistAppStateToLocal(true);
-  renderFullScene();
-  if (renderer) updateThreeScene();
-});
-
-window.onNewObjTypeChange = function() {
-  const t = document.getElementById("new-obj-type").value;
-  const cat = document.getElementById("new-obj-category").value;
-  const nameEl = document.getElementById("new-obj-name");
-  const wEl = document.getElementById("new-obj-w");
-  const dEl = document.getElementById("new-obj-d");
-  const hEl = document.getElementById("new-obj-h");
-  const seatHEl = document.getElementById("new-obj-seath");
-  const seatHRow = document.getElementById("new-obj-seath-row");
-  const zEl = document.getElementById("new-obj-z");
-  const zRow = document.getElementById("new-obj-z-row");
-
-  if (zRow) zRow.style.display = isZAdjustableWallType(t) ? "flex" : "none";
-  if (seatHRow) seatHRow.style.display = (t === "chair") ? "flex" : "none";
-
-  if (t === "chair") {
-    nameEl.value = "椅子"; wEl.value = 50; dEl.value = 50; hEl.value = 85; seatHEl.value = 45; zEl.value = 0;
-  } else if (t === "window") {
-    nameEl.value = "窗戶"; wEl.value = 120; dEl.value = 12; hEl.value = 130; zEl.value = 85;
-  } else if (t === "socket") {
-    nameEl.value = "插座"; wEl.value = 22; dEl.value = 12; hEl.value = 14; zEl.value = 30;
-  } else if (t === "switch") {
-    nameEl.value = "開關"; wEl.value = 22; dEl.value = 12; hEl.value = 14; zEl.value = 110;
-  } else if (t === "wall_item") {
-    nameEl.value = "壁掛冷氣/掛畫"; wEl.value = 85; dEl.value = 18; hEl.value = 30; zEl.value = 210;
-  } else if (t === "door") {
-    nameEl.value = "門扇"; wEl.value = 90; dEl.value = 14; hEl.value = 210; zEl.value = 0;
-  } else {
-    if (cat === "床") {
-      nameEl.value = "雙人床"; wEl.value = 152; dEl.value = 195; hEl.value = 55; zEl.value = 0;
-    } else {
-      nameEl.value = "新家具"; wEl.value = 60; dEl.value = 50; hEl.value = 30; zEl.value = 0;
-    }
-  }
-};
-
-window.confirmAddNewObject = function() {
-  const chosenCat = document.getElementById("new-obj-category").value || appState.categories[0];
-  const type = document.getElementById("new-obj-type").value || "furniture";
-  const name = document.getElementById("new-obj-name").value.trim() || "新物件";
-  const w = Math.max(4, parseFloat(document.getElementById("new-obj-w").value) || 60);
-  const d = Math.max(4, parseFloat(document.getElementById("new-obj-d").value) || 50);
-  const h = Math.max(4, Math.min(appState.home_design.height, parseFloat(document.getElementById("new-obj-h").value) || 30));
-  const seatH = type === "chair" ? Math.max(15, Math.min(h - 5, parseFloat(document.getElementById("new-obj-seath").value) || 45)) : 45;
-  const z = isZAdjustableWallType(type) ? Math.max(0, parseFloat(document.getElementById("new-obj-z").value) || 0) : 0;
-
-  const colorMap = { window: "#F59E0B", socket: "#F97316", switch: "#0EA5E9", wall_item: "#10B981", door: "#8B5A2B", chair: "#38BDF8", furniture: chosenCat === "床" ? "#FAD785" : "#38BDF8" };
-  const newItem = {
-    id: "item_" + Date.now(),
-    name: name,
-    category: type === "chair" && appState.categories.includes("椅子") ? "椅子" : chosenCat,
-    item_type: type,
-    x: 130, y: ["window", "socket", "switch", "wall_item", "door"].includes(type) ? appState.home_design.depth : 210, z: z,
-    w: w, d: d, h: h, seat_h: seatH, rot: 0,
-    color: colorMap[type] || "#38BDF8",
-    stroke_color: "#1E293B",
-    texture: "",
-    scenery: type === "window" ? appState.default_fuji : "",
-    flip_x: false, flip_y: false
-  };
-  expandedCategories.add(newItem.category);
-  findNonOverlappingSpot(newItem);
-  appState.items.push(newItem);
-  activeId = newItem.id;
-  persistAppStateToLocal(true);
-  renderFullScene();
-  selectItemById(newItem.id);
-  openSectionCollapse("collapse-body-edit", "collapse-icon-edit");
-};
-
-window.clearWallTexture = function() {
-  appState.home_design.wall_texture = "";
-  const el = document.getElementById("wall-texture-file");
-  if (el) el.value = "";
-  persistAppStateToLocal(true);
-  renderFullScene();
-  if (renderer) updateThreeScene();
-};
-
-window.clearCeilTexture = function() {
-  appState.home_design.ceiling_texture = "";
-  const el = document.getElementById("ceil-texture-file");
-  if (el) el.value = "";
-  persistAppStateToLocal(true);
-  renderFullScene();
-  if (renderer) updateThreeScene();
-};
-
-window.deleteSelectedActive = function() {
-  if (activeId && activeId !== "HUMAN") deleteItemById(activeId);
-};
-
-function deleteItemById(id, evt) {
-  if (evt) evt.stopPropagation();
-  appState.items = appState.items.filter(i => i.id !== id);
-  delete lastValidItemMap[id];
-  if (activeId === id) {
-    activeId = null;
-    if (transformControl) transformControl.detach();
-    onObjectDeselected();
-  }
-  persistAppStateToLocal(true);
-  renderFullScene();
-}
-
-bindEventSafe("btn-delete", "click", () => {
-  if (activeId && activeId !== "HUMAN") deleteItemById(activeId);
-});
-
-bindEventSafe("btn-duplicate", "click", () => {
-  if (activeId && activeId !== "HUMAN") {
-    window.duplicateItemById(activeId);
-  }
-});
-
-bindEventSafe("home-design-editable-lock", "change", function(e) {
-  appState.home_design.editable = e.target.checked;
-  renderVoidListUI();
-  renderFullScene();
-  persistAppStateToLocal(true);
-});
-
-function renderVoidListUI() {
-  const container = document.getElementById("void-list-container");
-  if (!container) return;
-  container.innerHTML = "";
-  const disabledAttr = appState.home_design.editable ? "" : "disabled";
-
-  appState.voids.forEach((v, idx) => {
-    const card = document.createElement("div");
-    card.style.cssText = "background:#1F232B; border:1px solid #334155; border-radius:6px; padding:7px; margin-bottom:5px; display:flex; flex-direction:column; gap:5px;";
-    card.innerHTML = `
-      <div style="display:flex; justify-content:space-between; align-items:center; gap:4px;">
-        <input type="text" value="${v.name}" ${disabledAttr} onchange="updateVoidField(${idx}, 'name', this.value)" style="font-weight:600;">
-        <button class="danger" ${disabledAttr} onclick="deleteVoidArea(${idx})" style="padding:3px 6px; font-size:11px; flex-shrink:0;">🗑️</button>
-      </div>
-      <div class="field-row">
-        <div><span style="font-size:10px;color:#94A3B8;">寬 W</span><input type="number" value="${Math.round(v.w)}" ${disabledAttr} onchange="updateVoidField(${idx}, 'w', this.value)"></div>
-        <div><span style="font-size:10px;color:#94A3B8;">深 D</span><input type="number" value="${Math.round(v.d)}" ${disabledAttr} onchange="updateVoidField(${idx}, 'd', this.value)"></div>
-        <div><span style="font-size:10px;color:#94A3B8;">X 坐標</span><input type="number" value="${Math.round(v.x)}" ${disabledAttr} onchange="updateVoidField(${idx}, 'x', this.value)"></div>
-        <div><span style="font-size:10px;color:#94A3B8;">Y 坐標</span><input type="number" value="${Math.round(v.y)}" ${disabledAttr} onchange="updateVoidField(${idx}, 'y', this.value)"></div>
-      </div>
-    `;
-    container.appendChild(card);
-  });
-}
-
-window.updateVoidField = function(idx, field, val) {
-  if (!appState.voids[idx]) return;
-  if (field === 'name') appState.voids[idx].name = val;
-  else {
-    if (val === "" || val === "-") return;
-    appState.voids[idx][field] = parseFloat(val) || 0;
-  }
-  persistAppStateToLocal(true);
-  renderFullScene();
-};
-
-window.addVoidArea = function() {
-  if (!appState.home_design.editable) {
-    alert("💡 請先勾選上方「🔓 勾選才可拖曳/改動留白處」！");
-    return;
-  }
-  appState.voids.push({ id: "void_" + Date.now(), name: `留白處 ${appState.voids.length + 1}`, x: 50, y: 50, w: 80, d: 80 });
-  persistAppStateToLocal(true);
-  renderVoidListUI();
-  renderFullScene();
-};
-
-window.deleteVoidArea = function(idx) {
-  appState.voids.splice(idx, 1);
-  persistAppStateToLocal(true);
-  renderVoidListUI();
-  renderFullScene();
-};
-
-function initHomeDesignFormValues() {
-  const edLock = document.getElementById("home-design-editable-lock");
-  if (edLock) edLock.checked = !!appState.home_design.editable;
-  setInputValueSafe("home-design-w", appState.home_design.width);
-  setInputValueSafe("home-design-d", appState.home_design.depth);
-  setInputValueSafe("home-design-h", appState.home_design.height);
-
-  const sw = document.getElementById("home-design-show-walls");
-  const sc = document.getElementById("home-design-show-ceiling");
-  if (sw) sw.checked = !!appState.home_design.show_walls;
-  if (sc) sc.checked = !!appState.home_design.show_ceiling;
-  setInputValueSafe("home-design-wall-color", appState.home_design.wall_color || "#F8FAFC");
-  setInputValueSafe("home-design-ceil-color", appState.home_design.ceiling_color || "#FFFFFF");
-
-  const cShow = document.getElementById("compass-show");
-  const cAuto = document.getElementById("compass-auto-center");
-  if (cShow) cShow.checked = appState.compass.show;
-  if (cAuto) cAuto.checked = !!appState.compass.auto_center;
-  setInputValueSafe("compass-x", appState.compass.x);
-  setInputValueSafe("compass-y", appState.compass.y);
-  setInputValueSafe("compass-rot", appState.compass.rotation || 0);
-  setInputValueSafe("compass-rot-slider", appState.compass.rotation || 0);
-  const cRotVal = document.getElementById("compass-rot-val");
-  if (cRotVal) cRotVal.innerText = (appState.compass.rotation || 0) + "°";
-
-  const fxShow = document.getElementById("feixing-show");
-  if (fxShow) fxShow.checked = !!appState.compass.show_feixing;
-  setInputValueSafe("feixing-year", appState.compass.feixing_year || 2026);
-}
-
-function syncHomeDesignFromInputs(e) {
-  if (e && (e.target.value === "" || e.target.value === "-")) return;
-  const targetId = e ? e.target.id : "";
-
-  appState.home_design.width = parseFloat(document.getElementById("home-design-w").value) || 400;
-  appState.home_design.depth = parseFloat(document.getElementById("home-design-d").value) || 300;
-  appState.home_design.height = parseFloat(document.getElementById("home-design-h").value) || 280;
-  appState.home_design.show_walls = document.getElementById("home-design-show-walls").checked;
-  appState.home_design.show_ceiling = document.getElementById("home-design-show-ceiling").checked;
-  appState.home_design.wall_color = document.getElementById("home-design-wall-color").value;
-  appState.home_design.ceiling_color = document.getElementById("home-design-ceil-color").value;
-
-  appState.compass.show = document.getElementById("compass-show").checked;
-  appState.compass.auto_center = document.getElementById("compass-auto-center").checked;
-
-  if (targetId === "compass-x" || targetId === "compass-y") {
-    appState.compass.auto_center = false;
-    document.getElementById("compass-auto-center").checked = false;
-    appState.compass.x = parseFloat(document.getElementById("compass-x").value) || 200;
-    appState.compass.y = parseFloat(document.getElementById("compass-y").value) || 150;
-  } else if (appState.compass.auto_center || targetId === "home-design-w" || targetId === "home-design-d") {
-    appState.compass.x = Math.round(appState.home_design.width / 2);
-    appState.compass.y = Math.round(appState.home_design.depth / 2);
-    setInputValueSafe("compass-x", appState.compass.x);
-    setInputValueSafe("compass-y", appState.compass.y);
-  }
-
-  appState.compass.rotation = parseFloat(document.getElementById("compass-rot").value) || 0;
-  setInputValueSafe("compass-rot-slider", appState.compass.rotation);
-  const cRotVal = document.getElementById("compass-rot-val");
-  if (cRotVal) cRotVal.innerText = appState.compass.rotation + "°";
-
-  appState.compass.show_feixing = document.getElementById("feixing-show").checked;
-  appState.compass.feixing_year = parseInt(document.getElementById("feixing-year").value) || 2026;
-
-  appState.items.forEach(it => enforceItemConstraints(it, "move", false));
-  persistAppStateToLocal(true);
-  renderFullScene();
-}
-
-document.querySelectorAll(".live-home-design-input").forEach(el => {
-  el.addEventListener("change", syncHomeDesignFromInputs);
-});
-bindEventSafe("compass-rot-slider", "input", e => {
-  const cRot = document.getElementById("compass-rot");
-  if (cRot) cRot.value = e.target.value;
-  syncHomeDesignFromInputs();
-});
-
-bindEventSafe("wall-texture-file", "change", function(e) {
-  const file = e.target.files[0];
-  if (!file) return;
-  const reader = new FileReader();
-  reader.onload = function(f) {
-    appState.home_design.wall_texture = f.target.result;
-    persistAppStateToLocal(true);
-    if (renderer) updateThreeScene();
-  };
-  reader.readAsDataURL(file);
-});
-bindEventSafe("ceil-texture-file", "change", function(e) {
-  const file = e.target.files[0];
-  if (!file) return;
-  const reader = new FileReader();
-  reader.onload = function(f) {
-    appState.home_design.ceiling_texture = f.target.result;
-    appState.home_design.show_ceiling = true;
-    const sc = document.getElementById("home-design-show-ceiling");
-    if (sc) sc.checked = true;
-    persistAppStateToLocal(true);
-    if (renderer) updateThreeScene();
-  };
-  reader.readAsDataURL(file);
-});
-
-window.toggleLockHorizFPV = function() {
-  appState.human.lock_horizontal = !appState.human.lock_horizontal;
-  if (appState.human.lock_horizontal) {
-    appState.human.pitch = 0;
-  }
-  initHumanFormValues();
-  if (currentMode === "FPV") syncFPVCamera();
-  persistAppStateToLocal(true);
-};
-
-bindEventSafe("human-lock-horiz", "change", e => {
-  appState.human.lock_horizontal = e.target.checked;
-  if (appState.human.lock_horizontal) {
-    appState.human.pitch = 0;
-  }
-  initHumanFormValues();
-  if (currentMode === "FPV") syncFPVCamera();
-  persistAppStateToLocal(true);
-});
-
-function initHumanFormValues() {
-  const h = appState.human;
-  const eyeH = getHumanEyeHeight();
-  const lockH = !!h.lock_horizontal;
-
-  const lockChk = document.getElementById("human-lock-horiz");
-  if (lockChk) lockChk.checked = lockH;
-  const hudLockBtn = document.getElementById("hud-btn-lock-h");
-  if (hudLockBtn) {
-    hudLockBtn.innerText = lockH ? "🔒水平" : "🔓自由";
-    hudLockBtn.classList.toggle("active", lockH);
-  }
-  ["human-pitch-slider", "human-pitch", "hud-pitch-slider"].forEach(id => {
-    const el = document.getElementById(id);
-    if (el) el.disabled = lockH;
-  });
-
-  setInputValueSafe("human-fov-h", h.fov_h || 100);
-  setInputValueSafe("human-fov-up", h.fov_up || 50);
-  setInputValueSafe("human-fov-down", h.fov_down || 65);
-  const hudFovLbl = document.getElementById("hud-fov-lbl");
-  if (hudFovLbl) hudFovLbl.innerText = `視野:${h.fov_h || 100}°(上${h.fov_up || 50}/下${h.fov_down || 65})`;
-
-  setInputValueSafe("human-height", h.height || 178);
-  setInputValueSafe("human-x", Math.round(h.x));
-  setInputValueSafe("human-y", Math.round(h.y));
-  setInputValueSafe("human-rot", Math.round(h.rot || 0));
-  setInputValueSafe("human-rot-slider", Math.round(h.rot || 0));
-  const hRotVal = document.getElementById("human-rot-val");
-  if (hRotVal) hRotVal.innerText = Math.round(h.rot || 0) + "°";
-
-  const maxUp = h.fov_up || 50;
-  const maxDown = -(h.fov_down || 65);
-  ["human-pitch-slider", "hud-pitch-slider"].forEach(id => {
-    const el = document.getElementById(id);
-    if (el) { el.max = maxUp; el.min = maxDown; }
-  });
-
-  setInputValueSafe("human-pitch", Math.round(h.pitch || 0));
-  setInputValueSafe("human-pitch-slider", Math.round(h.pitch || 0));
-  setInputValueSafe("hud-pitch-slider", Math.round(h.pitch || 0));
-  const hpVal = document.getElementById("human-pitch-val");
-  const hudPVal = document.getElementById("hud-pitch-lbl");
-  if (hpVal) hpVal.innerText = Math.round(h.pitch || 0) + "°";
-  if (hudPVal) hudPVal.innerText = Math.round(h.pitch || 0) + "°";
-
-  const p = h.posture || "stand";
-  const sitDesc = p === "sit" ? ` (座高:${h.seat_h || 45}cm)` : "";
-  const eyeInfo = document.getElementById("human-eye-info");
-  const basezInfo = document.getElementById("human-basez-info");
-  if (eyeInfo) eyeInfo.innerText = `視點高: ${eyeH} cm`;
-  if (basezInfo) basezInfo.innerText = `踏面Z: ${Math.round(h.z || 0)} cm${sitDesc}`;
-  const hudEyeLbl = document.getElementById("hud-eye-height-lbl");
-  if (hudEyeLbl) hudEyeLbl.innerText = `視點:${eyeH}cm`;
-
-  const sitOptBox = document.getElementById("sit-options-box");
-  if (sitOptBox) sitOptBox.style.display = (p === "sit") ? "flex" : "none";
-  const hudSitBar = document.getElementById("hud-sit-bar");
-  if (hudSitBar) hudSitBar.style.display = (p === "sit") ? "flex" : "none";
-
-  const btnBedEdge = document.getElementById("btn-sit-bed-edge");
-  const btnSitChair = document.getElementById("btn-sit-on-chair");
-  if (btnBedEdge) btnBedEdge.classList.toggle("active", p === "sit" && h.sit_mode === "bed_edge");
-  if (btnSitChair) btnSitChair.classList.toggle("active", p === "sit" && h.sit_mode === "chair");
-
-  ["stand", "sit", "lie"].forEach(mode => {
-    const b1 = document.getElementById("btn-posture-" + mode);
-    const b2 = document.getElementById("hud-btn-" + mode);
-    if (b1) b1.classList.toggle("active", p === mode);
-    if (b2) b2.classList.toggle("active", p === mode);
-  });
-}
-
-["human-fov-h", "human-fov-up", "human-fov-down", "human-height", "human-x", "human-y", "human-rot", "human-pitch"].forEach(id => {
-  const el = document.getElementById(id);
-  if (!el) return;
-  const commitHuman = () => {
-    if (el.value === "" || el.value === "-") return;
-    const val = parseFloat(el.value) || 0;
-    if (id === "human-fov-h") appState.human.fov_h = Math.max(30, Math.min(165, val));
-    if (id === "human-fov-up") appState.human.fov_up = Math.max(10, Math.min(85, val));
-    if (id === "human-fov-down") appState.human.fov_down = Math.max(10, Math.min(85, val));
-    if (id === "human-height") appState.human.height = Math.max(60, val);
-    if (id === "human-x") tryMoveHumanTo(val, appState.human.y, true);
-    if (id === "human-y") tryMoveHumanTo(appState.human.x, val, true);
-    if (id === "human-rot") appState.human.rot = ((val % 360) + 360) % 360;
-    if (id === "human-pitch" && !appState.human.lock_horizontal) {
-      appState.human.pitch = Math.max(-(appState.human.fov_down || 65), Math.min(appState.human.fov_up || 50, val));
-    }
-    initHumanFormValues();
-    renderFullScene();
-    if (currentMode === "FPV") syncFPVCamera();
-    persistAppStateToLocal(true);
-  };
-  el.addEventListener("change", commitHuman);
-  el.addEventListener("blur", commitHuman);
-});
-
-bindEventSafe("human-rot-slider", "input", e => {
-  appState.human.rot = parseFloat(e.target.value) || 0;
-  initHumanFormValues();
-  renderFullScene();
-  if (currentMode === "FPV") syncFPVCamera();
-  persistAppStateToLocal(true);
-});
-
-bindEventSafe("human-pitch-slider", "input", e => {
-  if (appState.human.lock_horizontal) return;
-  appState.human.pitch = parseFloat(e.target.value) || 0;
-  initHumanFormValues();
-  if (currentMode === "FPV") syncFPVCamera();
-  persistAppStateToLocal(true);
-});
-
-bindEventSafe("hud-pitch-slider", "input", e => {
-  if (appState.human.lock_horizontal) return;
-  appState.human.pitch = parseFloat(e.target.value) || 0;
-  initHumanFormValues();
-  if (currentMode === "FPV") syncFPVCamera();
-  persistAppStateToLocal(true);
-});
-
-window.setHumanPosture = function(p) {
-  appState.human.posture = p;
-  if (p === "sit") {
-    renderChairSelectOptions();
-    if (appState.human.sit_mode === "chair") {
-      window.sitOnSelectedChair(appState.human.sit_chair_id);
-      return;
-    } else {
-      window.sitAtBedEdge();
-      return;
-    }
-  }
-
-  if (!appState.human.lock_horizontal) {
-    if (p === "lie") {
-      appState.human.pitch = 35;
-      appState.home_design.show_ceiling = true;
-      const sc = document.getElementById("home-design-show-ceiling");
-      if (sc) sc.checked = true;
-    } else {
-      appState.human.pitch = 0;
-    }
-  }
-  const check = checkHumanWalkable(appState.human.x, appState.human.y);
-  appState.human.z = check.baseZ;
-  initHumanFormValues();
-  renderFullScene();
-  if (currentMode === "FPV") syncFPVCamera();
-  persistAppStateToLocal(true);
-};
-
-window.placeHumanOnBed = function(targetPosture = 'lie') {
-  if (targetPosture === "sit") {
-    window.sitAtBedEdge();
-    enterHumanFPV();
-    return;
-  }
-  const bed = appState.items.find(i => isBedItem(i));
-  if (bed) {
-    appState.human.x = Math.round(bed.x + bed.w / 2);
-    appState.human.y = Math.round(bed.y + bed.d * 0.35);
-    appState.human.z = (bed.z || 0) + (bed.h || 55);
-    appState.human.rot = 180;
-  }
-  setHumanPosture(targetPosture);
-  enterHumanFPV();
-};
-
-function renderRightPanel() {
-  const container = document.getElementById("item-list-container");
-  const cntEl = document.getElementById("obj-count");
-  if (!container) return;
-  if (cntEl) cntEl.innerText = `共 ${appState.items.length} 項`;
-  container.innerHTML = "";
-
-  const badgeMap = {
-    furniture: { text: "家具", cls: "" },
-    chair: { text: "🪑 椅子", cls: "win" },
-    wall_item: { text: "🖼️ 牆物", cls: "win" },
-    door: { text: "🚪 門", cls: "door" },
-    window: { text: "🪟 窗", cls: "win" },
-    socket: { text: "🔌 插座", cls: "win" },
-    switch: { text: "💡 開關", cls: "win" }
-  };
-
-  appState.categories.forEach(cat => {
-    const catItems = appState.items.filter(it => (it.category || appState.categories[0]) === cat);
-    const sec = document.createElement("div");
-    sec.className = "cat-section";
-    sec.setAttribute("data-cat", cat);
-
-    sec.addEventListener("dragover", e => {
-      e.preventDefault();
-      sec.classList.add("drag-over");
-    });
-    sec.addEventListener("dragleave", () => sec.classList.remove("drag-over"));
-    sec.addEventListener("drop", e => {
-      e.preventDefault();
-      sec.classList.remove("drag-over");
-      if (draggedItemId) moveItemToCategory(draggedItemId, cat);
-    });
-
-    const isExpanded = expandedCategories.has(cat);
-    const header = document.createElement("div");
-    header.className = "cat-header";
-    header.innerHTML = `<span>${isExpanded ? '📂' : '📁'} ${cat} ${cat === '床' ? '🛏️' : (cat === '椅子' ? '🪑' : '')}</span><span style="font-size:11px;color:#64748B;">${catItems.length} 項 ${isExpanded ? '▾' : '▸'}</span>`;
-
-    const listBox = document.createElement("div");
-    listBox.className = "cat-items";
-    listBox.style.display = isExpanded ? "flex" : "none";
-
-    header.onclick = () => {
-      if (expandedCategories.has(cat)) expandedCategories.delete(cat);
-      else expandedCategories.add(cat);
-      renderRightPanel();
-    };
-
-    catItems.forEach(item => {
-      const card = document.createElement("div");
-      card.className = "item-card" + (item.id === activeId ? " selected" : "");
-      card.draggable = true;
-      card.onclick = () => selectItemById(item.id);
-
-      card.addEventListener("dragstart", e => {
-        draggedItemId = item.id;
-        card.classList.add("dragging");
-        e.dataTransfer.setData("text/plain", item.id);
-      });
-      card.addEventListener("dragend", () => {
-        card.classList.remove("dragging");
-        draggedItemId = null;
-        document.querySelectorAll(".cat-section").forEach(s => s.classList.remove("drag-over"));
-      });
-
-      const b = badgeMap[item.item_type || "furniture"] || badgeMap.furniture;
-      const seatInfo = item.item_type === "chair" ? ` | 坐墊:${item.seat_h || 45}cm` : "";
-      const borderStyle = item.stroke_color ? `border:2px solid ${item.stroke_color};` : 'border:1px solid #fff;';
-      card.innerHTML = `
-        <div class="item-card-header">
-          <div class="name">
-            <span style="color:#64748B;font-size:11px;cursor:grab;">⠿</span>
-            <span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${item.color};${borderStyle}"></span>
-            <span>${item.name}</span>
-            <span class="badge ${b.cls}">${b.text}</span>
-          </div>
-          <div style="display:flex; gap:2px; align-items:center;">
-            <button class="card-del-btn" title="複製並貼上此物件" onclick="duplicateItemById('${item.id}', event)">📋</button>
-            <button class="card-del-btn" title="刪除" onclick="deleteItemById('${item.id}', event)">🗑️</button>
-          </div>
-        </div>
-        <div class="dims">
-          ${Math.round(item.w)}×${Math.round(item.d)}×${item.h || 30}${seatInfo} | ${item.rot || 0}°
-        </div>
-      `;
-      listBox.appendChild(card);
-    });
-
-    sec.appendChild(header);
-    sec.appendChild(listBox);
-    container.appendChild(sec);
-  });
-}
-
-function highlightRightPanel() {
-  renderRightPanel();
-}
-
-function selectItemById(id) {
-  activeId = id;
-  const item = appState.items.find(i => i.id === id);
-  if (item && isChairItem(item) && appState.human.posture === "sit") {
-    window.sitOnSelectedChair(item.id);
-  }
-  if (currentMode === "2D") {
-    const group = canvas.getObjects().find(o => o.itemId === id);
-    if (group && !forcePanMode) {
-      canvas.setActiveObject(group);
-      canvas.requestRenderAll();
-    }
-  } else if (currentMode === "3D" && transformControl) {
-    const mesh = selectable3DMeshes.find(m => m.userData.itemId === id);
-    if (mesh) attachGizmoWithRules(mesh);
-  }
-  switchLeftTab('item');
-  openSectionCollapse("collapse-body-edit", "collapse-icon-edit");
-  updateLeftItemPanel();
-  highlightRightPanel();
-}
-
-function zoomToFit() {
-  if (!canvas) return;
-  const rw = appState.home_design.width, rd = appState.home_design.depth;
-  const container = document.getElementById("canvas-container");
-  const cw = container.clientWidth - 90, ch = container.clientHeight - 90;
-  const scale = Math.min(cw / rw, ch / rd, 1.65);
-  const offsetX = (container.clientWidth - rw * scale) / 2;
-  const offsetY = (container.clientHeight - rd * scale) / 2;
-  canvas.setViewportTransform([scale, 0, 0, scale, offsetX, offsetY]);
-  canvas.requestRenderAll();
-}
-
-bindEventSafe("btn-zoom-fit", "click", zoomToFit);
-bindEventSafe("btn-zoom-in", "click", () => canvas.setZoom(Math.min(canvas.getZoom() * 1.2, 5)));
-bindEventSafe("btn-zoom-out", "click", () => canvas.setZoom(Math.max(canvas.getZoom() / 1.2, 0.2)));
-bindEventSafe("btn-pan-toggle", "click", function() {
-  forcePanMode = !forcePanMode;
-  this.innerText = forcePanMode ? "✋ 平移: 開" : "✋ 平移: 關";
-  this.classList.toggle("active", forcePanMode);
-  renderFullScene();
-});
-
-bindEventSafe("btn-save-local", "click", () => {
-  persistAppStateToLocal(false);
-  const banner = document.getElementById("save-status-banner");
-  if (banner) {
-    const nowStr = new Date().toLocaleTimeString();
-    banner.innerText = `✅ 已於 ${nowStr} 手動儲存！下次開啟 App 將自動載入此室內設計。`;
-  }
-});
-
-bindEventSafe("btn-load-local", "click", () => {
-  let saved = null;
-  for (let i = 0; i < STORAGE_KEYS_LEGACY.length; i++) {
-    saved = readStorageItem(STORAGE_KEYS_LEGACY[i]);
-    if (saved) break;
-  }
-  if (saved) {
-    appState = JSON.parse(saved);
-    normalizeAppState(appState);
-    appState.items.forEach(it => saveValidItemBackup(it));
-    renderCategoryUI();
-    renderChairSelectOptions();
-    renderRecentColorsPalette();
-    initHomeDesignFormValues();
-    initHumanFormValues();
-    syncLockScaleUI();
-    renderVoidListUI();
-    renderFullScene();
-    zoomToFit();
-    showToast("📂 已成功載入上次儲存的室內設計！");
-  } else {
-    showToast("⚠️ 尚未找到本地存檔紀錄！");
-  }
-});
-
-bindEventSafe("btn-export-file", "click", () => {
-  const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(appState, null, 2));
-  const a = document.createElement('a');
-  a.setAttribute("href", dataStr);
-  a.setAttribute("download", "home_design_" + new Date().toISOString().slice(0, 10) + ".json");
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-});
-
-bindEventSafe("file-import", "change", function(e) {
-  const file = e.target.files[0];
-  if (!file) return;
-  const reader = new FileReader();
-  reader.onload = function(evt) {
-    try {
-      appState = JSON.parse(evt.target.result);
-      normalizeAppState(appState);
-      appState.items.forEach(it => saveValidItemBackup(it));
-      persistAppStateToLocal(true);
-      renderCategoryUI();
-      renderChairSelectOptions();
-      renderRecentColorsPalette();
-      initHomeDesignFormValues();
-      initHumanFormValues();
-      syncLockScaleUI();
-      renderVoidListUI();
-      renderFullScene();
-      zoomToFit();
-      showToast("✅ 室內設計檔案載入成功！");
-    } catch(err) {
-      alert("❌ 檔案格式錯誤！");
-    }
-  };
-  reader.readAsText(file);
-});
-
-bindEventSafe("btn-reset-default", "click", () => {
-  if (confirm("確定要重置回附圖原始預設配置嗎？")) {
-    const baseCfg = (typeof DEFAULT_ORIGINAL_CONFIG !== "undefined") ? DEFAULT_ORIGINAL_CONFIG : INITIAL_CONFIG;
-    appState = JSON.parse(JSON.stringify(baseCfg));
-    normalizeAppState(appState);
-    STORAGE_KEYS_LEGACY.forEach(k => removeStorageItem(k));
-    appState.items.forEach(it => saveValidItemBackup(it));
-    renderCategoryUI();
-    renderChairSelectOptions();
-    renderRecentColorsPalette();
-    initHomeDesignFormValues();
-    initHumanFormValues();
-    syncLockScaleUI();
-    renderVoidListUI();
-    renderFullScene();
-    zoomToFit();
-    showToast("🔄 已重置回原始預設配置！");
-  }
-});
-
-function initPanelResizers() {
-  const leftPanel = document.getElementById("left-panel");
-  const rightPanel = document.getElementById("right-panel");
-  const leftResizer = document.getElementById("left-resizer");
-  const rightResizer = document.getElementById("right-resizer");
-
-  let resizingSide = null;
-
-  const startResize = (side, e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    resizingSide = side;
-  };
-
-  if (leftResizer) leftResizer.addEventListener("pointerdown", e => startResize("left", e));
-  if (rightResizer) rightResizer.addEventListener("pointerdown", e => startResize("right", e));
-
-  window.addEventListener("pointermove", e => {
-    if (!resizingSide) return;
-    if (resizingSide === "left" && leftPanel) {
-      const newW = Math.max(145, Math.min(window.innerWidth * 0.88, e.clientX));
-      leftPanel.style.width = newW + "px";
-    } else if (resizingSide === "right" && rightPanel) {
-      const newW = Math.max(145, Math.min(window.innerWidth * 0.88, window.innerWidth - e.clientX));
-      rightPanel.style.width = newW + "px";
-    }
-    window.dispatchEvent(new Event("resize"));
-  });
-
-  window.addEventListener("pointerup", () => {
-    resizingSide = null;
-  });
-
-  const newCatSel = document.getElementById("new-obj-category");
-  if (newCatSel) newCatSel.addEventListener("change", window.onNewObjTypeChange);
-}
-
-window.toggleMinimizeFPVHud = function() {
-  const hud = document.getElementById("fpv-hud");
-  const btn = document.getElementById("btn-fpv-min");
-  if (!hud || !btn) return;
-  hud.classList.toggle("minimized");
-  btn.innerText = hud.classList.contains("minimized") ? "□" : "—";
-};
-
-function initFPVHudDragAndResize() {
-  const hud = document.getElementById("fpv-hud");
-  const dragBar = document.getElementById("fpv-hud-drag");
-  const resizer = document.getElementById("fpv-hud-resizer");
-  if (!hud || !dragBar || !resizer) return;
-
-  let isDraggingHud = false;
-  let isResizingHud = false;
-  let startX = 0, startY = 0;
-  let origLeft = 0, origTop = 0;
-  let currentScale = 1.0;
-  let startScale = 1.0;
-
-  dragBar.addEventListener("pointerdown", e => {
-    if (e.target.tagName.toLowerCase() === "button") return;
-    e.preventDefault();
-    e.stopPropagation();
-    isDraggingHud = true;
-    const rect = hud.getBoundingClientRect();
-    const parentRect = hud.parentElement.getBoundingClientRect();
-    origLeft = rect.left - parentRect.left;
-    origTop = rect.top - parentRect.top;
-    hud.style.left = origLeft + "px";
-    hud.style.top = origTop + "px";
-    hud.style.right = "auto";
-    hud.style.bottom = "auto";
-    startX = e.clientX;
-    startY = e.clientY;
-  });
-
-  resizer.addEventListener("pointerdown", e => {
-    e.preventDefault();
-    e.stopPropagation();
-    isResizingHud = true;
-    startX = e.clientX;
-    startY = e.clientY;
-    startScale = currentScale;
-  });
-
-  window.addEventListener("pointermove", e => {
-    if (isDraggingHud) {
-      const parentRect = hud.parentElement.getBoundingClientRect();
-      let nx = origLeft + (e.clientX - startX);
-      let ny = origTop + (e.clientY - startY);
-      nx = Math.max(4, Math.min(parentRect.width - 90, nx));
-      ny = Math.max(48, Math.min(parentRect.height - 60, ny));
-      hud.style.left = nx + "px";
-      hud.style.top = ny + "px";
-    } else if (isResizingHud) {
-      const delta = (e.clientX - startX + e.clientY - startY) * 0.004;
-      currentScale = Math.max(0.55, Math.min(1.35, startScale + delta));
-      hud.style.transform = `scale(${currentScale})`;
-    }
-  });
-
-  window.addEventListener("pointerup", () => {
-    isDraggingHud = false;
-    isResizingHud = false;
-  });
-}
+      item.stroke_
