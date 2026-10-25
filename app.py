@@ -5,7 +5,7 @@ from pathlib import Path
 from default_data import INITIAL_DATA
 
 st.set_page_config(
-    page_title="專業臥室空間設計 & 3D人類視角風水系統",
+    page_title="專業室內設計 & 3D視角風水系統",
     page_icon="📐",
     layout="wide",
     initial_sidebar_state="collapsed"
@@ -21,19 +21,6 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 base_dir = Path(__file__).parent / "frontend"
-save_file_path = Path(__file__).parent / "saved_design.json"
-
-# 讀取上次儲存於伺服器端的設計檔 (若存在則優先作為預設載入資料)
-loaded_data = INITIAL_DATA
-if save_file_path.exists():
-    try:
-        saved_json = json.loads(save_file_path.read_text(encoding="utf-8"))
-        if isinstance(saved_json, dict) and "room" in saved_json and "items" in saved_json:
-            saved_json["default_fuji"] = INITIAL_DATA["default_fuji"]
-            loaded_data = saved_json
-    except Exception:
-        loaded_data = INITIAL_DATA
-
 css_content = (base_dir / "styles.css").read_text(encoding="utf-8")
 html_body = (base_dir / "template.html").read_text(encoding="utf-8")
 js_2d = (base_dir / "engine_2d.js").read_text(encoding="utf-8")
@@ -54,7 +41,7 @@ full_html = f"""<!DOCTYPE html>
   {html_body}
   <script>
     const DEFAULT_ORIGINAL_CONFIG = {json.dumps(INITIAL_DATA, ensure_ascii=False)};
-    const INITIAL_CONFIG = {json.dumps(loaded_data, ensure_ascii=False)};
+    const INITIAL_CONFIG = {json.dumps(INITIAL_DATA, ensure_ascii=False)};
     {js_2d}
     {js_3d}
     window.addEventListener("load", initFabric);
