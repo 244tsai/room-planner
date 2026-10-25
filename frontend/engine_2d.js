@@ -1,33 +1,75 @@
-let appState = JSON.parse(JSON.stringify(INITIAL_CONFIG));
-if (!appState.voids && appState.void) {
-  appState.voids = [{ id: "void_1", name: "留白處 1", x: appState.void.x, y: appState.void.y, w: appState.void.w, d: appState.void.d }];
+const STORAGE_KEY_PRIMARY = "room_planner_v10_saved";
+const STORAGE_KEYS_LEGACY = ["room_planner_v10_saved", "room_planner_v9", "room_planner_v8", "room_planner_v7"];
+
+function loadInitialAppState() {
+  for (let i = 0; i < STORAGE_KEYS_LEGACY.length; i++) {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEYS_LEGACY[i]);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && parsed.room && Array.isArray(parsed.items)) {
+          parsed.default_fuji = INITIAL_CONFIG.default_fuji;
+          return parsed;
+        }
+      }
+    } catch (e) {
+      console.warn("讀取 localStorage 失敗:", e);
+    }
+  }
+  return JSON.parse(JSON.stringify(INITIAL_CONFIG));
 }
-if (!appState.categories) appState.categories = ["床", "大型家具", "收納櫃體", "椅子", "門窗建材", "機電開關", "牆面裝飾"];
-if (!appState.categories.includes("床")) appState.categories.unshift("床");
-if (!appState.categories.includes("椅子")) appState.categories.splice(3, 0, "椅子");
-appState.items.forEach(it => {
-  if (it.id === "bed" || it.name === "床") it.category = "床";
-  if (it.item_type === "chair" && it.seat_h === undefined) it.seat_h = 45;
-});
 
-if (!appState.human) appState.human = {};
-appState.human = Object.assign({
-  x: 230, y: 230, z: 0, height: 178, rot: 0, pitch: 0,
-  posture: "stand", sit_mode: "bed_edge", sit_chair_id: "", seat_h: 55,
-  lock_horizontal: false, fov_h: 100, fov_up: 50, fov_down: 65
-}, appState.human);
+function normalizeAppState(state) {
+  if (!state.voids && state.void) {
+    state.voids = [{ id: "void_1", name: "留白處 1", x: state.void.x, y: state.void.y, w: state.void.w, d: state.void.d }];
+  }
+  if (!state.voids) state.voids = [];
+  if (!state.categories) state.categories = ["床", "大型家具", "收納櫃體", "椅子", "門窗建材", "機電開關", "牆面裝飾"];
+  if (!state.categories.includes("床")) state.categories.unshift("床");
+  if (!state.categories.includes("椅子")) state.categories.splice(3, 0, "椅子");
 
-if (appState.room.show_walls === undefined) appState.room.show_walls = true;
-if (appState.room.show_ceiling === undefined) appState.room.show_ceiling = false;
-if (appState.room.lock_scale === undefined) appState.room.lock_scale = false;
-if (appState.compass.auto_center === undefined) appState.compass.auto_center = true;
+  state.items.forEach(it => {
+    if (it.id === "bed" || it.name === "床") it.category = "床";
+    if (it.item_type === "chair" && it.seat_h === undefined) it.seat_h = 45;
+  });
 
-if (appState.compass.auto_center) {
-  appState.compass.x = Math.round(appState.room.width / 2);
-  appState.compass.y = Math.round(appState.room.depth / 2);
+  if (!state.human) state.human = {};
+  state.human = Object.assign({
+    x: 230, y: 230, z: 0, height: 178, rot: 0, pitch: 0,
+    posture: "stand", sit_mode: "bed_edge", sit_chair_id: "chair_desk", seat_h: 55,
+    lock_horizontal: false, fov_h: 100, fov_up: 50, fov_down: 65
+  }, state.human);
+
+  if (state.room.show_walls === undefined) state.room.show_walls = true;
+  if (state.room.show_ceiling === undefined) state.room.show_ceiling = false;
+  if (state.room.lock_scale === undefined) state.room.lock_scale = false;
+  if (state.compass.auto_center === undefined) state.compass.auto_center = true;
+
+  if (state.compass.auto_center) {
+    state.compass.x = Math.round(state.room.width / 2);
+    state.compass.y = Math.round(state.room.depth / 2);
+  }
+  state.default_fuji = INITIAL_CONFIG.default_fuji;
+}
+
+let appState = loadInitialAppState();
+normalizeAppState(appState);
+
+function persistAppStateToLocal(silent = true) {
+  try {
+    const serialized = JSON.stringify(appState);
+    localStorage.setItem(STORAGE_KEY_PRIMARY, serialized);
+    localStorage.setItem("room_planner_v9", serialized);
+    if (!silent) {
+      showToast("💾 設計已成功儲存於 App 記憶中！");
+    }
+  } catch (e) {
+    if (!silent) alert("⚠️ 儲存失敗，可能是自訂圖片材質檔案過大超出瀏覽器限制！");
+  }
 }
 
 let activeId = null;
+let clipboardItem = null; // 剪貼簿：供複製貼上與 Ctrl+C / Ctrl+V 使用
 let canvas, scene, camera, renderer, controls, transformControl;
 let currentMode = "2D";
 let gizmoMode = "translate";
@@ -58,7 +100,7 @@ function showToast(msg) {
   el.innerText = msg;
   el.classList.add("show");
   if (toastTimeout) clearTimeout(toastTimeout);
-  toastTimeout = setTimeout(() => el.classList.remove("show"), 1600);
+  toastTimeout = setTimeout(() => el.classList.remove("show"), 1800);
 }
 
 function isBedItem(it) {
@@ -75,6 +117,26 @@ function isZAdjustableWallType(t) {
 
 function isOuterWallProtrudingType(t) {
   return ["window", "socket", "switch"].includes(t);
+}
+
+// 計算人物坐在指定椅子上時的精準位置與視角（確保人物背部貼靠椅背、面向椅子正前方看出去）
+function computeChairSitPose(chair) {
+  const rotDeg = ((chair.rot || 0) % 360 + 360) % 360;
+  const rad = rotDeg * Math.PI / 180;
+  const cx = chair.x + chair.w / 2;
+  const cy = chair.y + chair.d / 2;
+  // 椅子在 rot=0 時，椅背在 +Y(南側)，正面朝向 -Y(北側)。
+  // 將人物臀部中心往椅背方向微移，使背部自然貼齊椅背、雙腿朝正前方延伸
+  const backOffset = Math.max(0, Math.min(8, chair.d * 0.14));
+  const sitX = Math.round(cx - Math.sin(rad) * backOffset);
+  const sitY = Math.round(cy + Math.cos(rad) * backOffset);
+  return {
+    x: sitX,
+    y: sitY,
+    z: 0,
+    seat_h: chair.seat_h || 45,
+    rot: rotDeg
+  };
 }
 
 function getItemAABB(it) {
@@ -205,7 +267,11 @@ function enforceItemConstraints(item, mode = "move", showMsg = false) {
           if (box.x0 < 0 || box.x1 > rw) item.w = prev.w;
           if (box.y0 < 0 || box.y1 > rd) item.d = prev.d;
         } else if (mode === "rotate") {
-          item.rot = prev.rot;
+          const clampedRotBox = getItemAABB(item);
+          if (clampedRotBox.x0 < 0) item.x += (0 - clampedRotBox.x0);
+          if (clampedRotBox.x1 > rw) item.x -= (clampedRotBox.x1 - rw);
+          if (clampedRotBox.y0 < 0) item.y += (0 - clampedRotBox.y0);
+          if (clampedRotBox.y1 > rd) item.y -= (clampedRotBox.y1 - rd);
         }
         const clampedBox = getItemAABB(item);
         if (clampedBox.x0 < 0) item.x += (0 - clampedBox.x0);
@@ -233,7 +299,25 @@ function enforceItemConstraints(item, mode = "move", showMsg = false) {
 
       item.x = prev.x; item.y = prev.y; item.z = prev.z;
     } else if (mode === "rotate") {
-      item.rot = prev.rot;
+      // 嘗試微幅推開避免旋轉卡死，若仍碰撞才還原角度
+      const boxA = getItemAABB(item);
+      const boxB = getItemAABB(hitOther);
+      const pushLeft = boxA.x1 - boxB.x0;
+      const pushRight = boxB.x1 - boxA.x0;
+      const pushUp = boxA.y1 - boxB.y0;
+      const pushDown = boxB.y1 - boxA.y0;
+      const minPush = Math.min(pushLeft, pushRight, pushUp, pushDown);
+      if (minPush <= 25) {
+        if (minPush === pushLeft) item.x = Math.round(item.x - pushLeft);
+        else if (minPush === pushRight) item.x = Math.round(item.x + pushRight);
+        else if (minPush === pushUp) item.y = Math.round(item.y - pushUp);
+        else item.y = Math.round(item.y + pushDown);
+      }
+      if (hasAnyCollision(item)) {
+        item.rot = prev.rot;
+        item.x = prev.x;
+        item.y = prev.y;
+      }
     } else {
       const boxA = getItemAABB(item);
       const boxB = getItemAABB(hitOther);
@@ -273,14 +357,19 @@ function enforceItemConstraints(item, mode = "move", showMsg = false) {
     }
   }
 
-  // 若移動的是目前人物正坐著的椅子，人物位置同步跟隨椅子移動
+  // 若移動或旋轉的是目前人物正坐著的椅子，人物位置與面向同步跟隨椅子更新
   if (appState.human.posture === "sit" && appState.human.sit_mode === "chair" && appState.human.sit_chair_id === item.id) {
-    appState.human.x = Math.round(item.x + item.w / 2);
-    appState.human.y = Math.round(item.y + item.d / 2);
-    appState.human.seat_h = item.seat_h || 45;
+    const pose = computeChairSitPose(item);
+    appState.human.x = pose.x;
+    appState.human.y = pose.y;
+    appState.human.seat_h = pose.seat_h;
+    appState.human.rot = pose.rot;
+    initHumanFormValues();
+    if (currentMode === "FPV") syncFPVCamera();
   }
 
   saveValidItemBackup(item);
+  persistAppStateToLocal(true);
   return true;
 }
 
@@ -291,8 +380,8 @@ function findNonOverlappingSpot(newItem) {
     return;
   }
   const rw = appState.room.width, rd = appState.room.depth;
-  for (let y = 10; y <= rd - newItem.d - 10; y += 25) {
-    for (let x = 10; x <= rw - newItem.w - 10; x += 25) {
+  for (let y = 10; y <= rd - newItem.d - 10; y += 20) {
+    for (let x = 10; x <= rw - newItem.w - 10; x += 20) {
       newItem.x = x; newItem.y = y;
       if (!hasAnyCollision(newItem)) {
         saveValidItemBackup(newItem);
@@ -305,18 +394,20 @@ function findNonOverlappingSpot(newItem) {
   saveValidItemBackup(newItem);
 }
 
-// 人物行走與坐床邊移動邏輯
+// 人物行走與坐床邊移動邏輯（修正床邊被床頭櫃卡死的問題）
 function checkHumanWalkable(nx, ny) {
-  const radius = 14;
+  const isSittingBedEdge = (appState.human.posture === "sit" && appState.human.sit_mode === "bed_edge");
+  const radius = isSittingBedEdge ? 2 : 12;
   const rw = appState.room.width, rd = appState.room.depth;
 
   if (appState.room.show_walls) {
-    if (nx < radius || nx > rw - radius || ny < radius || ny > rd - radius) {
+    const wallPad = isSittingBedEdge ? 2 : radius;
+    if (nx < wallPad || nx > rw - wallPad || ny < wallPad || ny > rd - wallPad) {
       return { allowed: false, baseZ: appState.human.z || 0 };
     }
   }
 
-  // 若人物目前處於「坐椅子上」，檢查是否就在該椅子上
+  // 若人物目前處於「坐椅子上」，允許坐在椅子上
   if (appState.human.posture === "sit" && appState.human.sit_mode === "chair") {
     const ch = appState.items.find(i => i.id === appState.human.sit_chair_id);
     if (ch) {
@@ -342,9 +433,8 @@ function checkHumanWalkable(nx, ny) {
     const halfD = it.d / 2;
 
     if (isBedItem(it)) {
-      if (Math.abs(lx) <= halfW + 6 && Math.abs(ly) <= halfD + 6) {
-        if (appState.human.posture === "sit" && appState.human.sit_mode === "bed_edge") {
-          // 坐床邊模式：雙腳踩在地板上 (baseZ = 0)，臀部高度設為床高
+      if (Math.abs(lx) <= halfW + 8 && Math.abs(ly) <= halfD + 8) {
+        if (isSittingBedEdge) {
           appState.human.seat_h = (it.z || 0) + (it.h || 55);
           supportZ = 0;
         } else {
@@ -352,59 +442,75 @@ function checkHumanWalkable(nx, ny) {
         }
       }
     } else if (it.item_type === "furniture" || it.item_type === "chair" || it.item_type === "wall_item") {
-      if (Math.abs(lx) < halfW + radius && Math.abs(ly) < halfD + radius) {
-        return { allowed: false, baseZ: appState.human.z || 0 };
+      // 坐床邊時，忽略床頭櫃等緊貼床邊的小型家具擦邊阻擋，確保床邊移動完全順暢不卡死
+      if (isSittingBedEdge) {
+        if (Math.abs(lx) < halfW - 2 && Math.abs(ly) < halfD - 2) {
+          return { allowed: false, baseZ: 0 };
+        }
+      } else {
+        if (Math.abs(lx) < halfW + radius && Math.abs(ly) < halfD + radius) {
+          return { allowed: false, baseZ: appState.human.z || 0 };
+        }
       }
     }
   }
   return { allowed: true, baseZ: supportZ };
 }
 
-// 當人物處於「坐床邊」模式移動時，自動將座標吸附在床的四邊外沿滑動，並面向房內外
+// 當人物處於「坐床邊」模式時，支援沿著床的四邊外沿無縫滑動（不會被床頭櫃或角落卡死）
 function clampToBedEdge(nx, ny) {
   const bed = appState.items.find(i => isBedItem(i));
-  if (!bed) return { x: nx, y: ny };
+  if (!bed) return { x: nx, y: ny, edge: "bottom" };
 
-  const pad = 4; // 臀部在床沿內側、雙腿在床沿外側
-  const minX = bed.x + 15, maxX = bed.x + bed.w - 15;
-  const minY = bed.y + 15, maxY = bed.y + bed.d - 15;
+  const pad = 3; // 臀部在床沿內側 3cm
+  const minX = bed.x + pad;
+  const maxX = bed.x + bed.w - pad;
+  const minY = bed.y + pad;
+  const maxY = bed.y + bed.d - pad;
 
-  const dBottom = Math.abs(ny - (bed.y + bed.d));
-  const dLeft = Math.abs(nx - bed.x);
-  const dRight = Math.abs(nx - (bed.x + bed.w));
-  const dTop = Math.abs(ny - bed.y);
-  const m = Math.min(dBottom, dLeft, dRight, dTop);
+  const cx = Math.max(minX, Math.min(maxX, nx));
+  const cy = Math.max(minY, Math.min(maxY, ny));
+
+  const dBottom = Math.abs(cy - maxY);
+  const dLeft = Math.abs(cx - minX);
+  const dRight = Math.abs(cx - maxX);
+  const dTop = Math.abs(cy - minY);
+
+  // 若床某側緊貼牆壁 (例如 y === 0 北牆)，優先吸附在可坐人的三側(左、右、下)
+  const candidates = [
+    { edge: "bottom", dist: dBottom, x: cx, y: maxY, rot: 180 },
+    { edge: "left", dist: dLeft, x: minX, y: cy, rot: 270 },
+    { edge: "right", dist: dRight, x: maxX, y: cy, rot: 90 }
+  ];
+  if (bed.y > 20) {
+    candidates.push({ edge: "top", dist: dTop, x: cx, y: minY, rot: 0 });
+  }
+  candidates.sort((a, b) => a.dist - b.dist);
+  const chosen = candidates[0];
 
   appState.human.seat_h = (bed.z || 0) + (bed.h || 55);
-  appState.human.z = 0; // 坐床邊時腳踩在地板上 Z=0
+  appState.human.z = 0;
 
-  if (m === dBottom) {
-    return { x: Math.max(minX, Math.min(maxX, nx)), y: bed.y + bed.d - pad };
-  } else if (m === dLeft) {
-    return { x: bed.x + pad, y: Math.max(minY, Math.min(maxY, ny)) };
-  } else if (m === dRight) {
-    return { x: bed.x + bed.w - pad, y: Math.max(minY, Math.min(maxY, ny)) };
-  } else {
-    return { x: Math.max(minX, Math.min(maxX, nx)), y: bed.y + pad };
-  }
+  return { x: Math.round(chosen.x), y: Math.round(chosen.y), edge: chosen.edge, suggestRot: chosen.rot };
 }
 
 function tryMoveHumanTo(nx, ny, showBlockMsg = false) {
-  // 若處於「坐椅子上」，當使用者按方向鍵移動時，自動切換為可移動的「坐床邊」或站立移動
+  // 若處於「坐椅子上」，當使用者拖曳人物或按方向鍵移動時，若拉離椅子超過一定距離則切換為坐床邊或自由移動
   if (appState.human.posture === "sit" && appState.human.sit_mode === "chair") {
-    appState.human.sit_mode = "bed_edge";
+    const distFromChair = Math.hypot(nx - appState.human.x, ny - appState.human.y);
+    if (distFromChair > 1.2) {
+      appState.human.sit_mode = "bed_edge";
+    }
   }
 
-  // 若處於「坐床邊」模式，允許人物沿著床邊滑動！
+  // 若處於「坐床邊」模式，允許人物沿著床邊滑動且絕不卡住！
   if (appState.human.posture === "sit" && appState.human.sit_mode === "bed_edge") {
     const edgePt = clampToBedEdge(nx, ny);
-    const res = checkHumanWalkable(edgePt.x, edgePt.y);
-    if (res.allowed) {
-      appState.human.x = edgePt.x;
-      appState.human.y = edgePt.y;
-      appState.human.z = 0;
-      return true;
-    }
+    appState.human.x = edgePt.x;
+    appState.human.y = edgePt.y;
+    appState.human.z = 0;
+    persistAppStateToLocal(true);
+    return true;
   }
 
   const res = checkHumanWalkable(nx, ny);
@@ -412,26 +518,28 @@ function tryMoveHumanTo(nx, ny, showBlockMsg = false) {
     appState.human.x = nx;
     appState.human.y = ny;
     appState.human.z = res.baseZ;
+    persistAppStateToLocal(true);
     return true;
   }
   const resX = checkHumanWalkable(nx, appState.human.y);
   if (resX.allowed) {
     appState.human.x = nx;
     appState.human.z = resX.baseZ;
+    persistAppStateToLocal(true);
     return true;
   }
   const resY = checkHumanWalkable(appState.human.x, ny);
   if (resY.allowed) {
     appState.human.y = ny;
     appState.human.z = resY.baseZ;
+    persistAppStateToLocal(true);
     return true;
   }
   if (showBlockMsg) showToast("⚠️ 前方有家具阻擋，人物已貼齊卡住！");
   return false;
 }
 
-// 計算真實人類眼高：
-// 坐下時：雙腳踩在地面 (Z=0)，臀部高度為 seat_h (床高 55cm 或椅子坐墊高 45cm)，眼高 = 臀部座高 + 坐姿上半身眼高(身高*0.44)
+// 計算真實人類眼高
 function getHumanEyeHeight() {
   const h = appState.human;
   const stature = h.height || 178;
@@ -478,18 +586,26 @@ function renderChairSelectOptions() {
   }
 }
 
-// 選擇「坐床邊」（腳著地 Z=0，臀部貼齊床高，且可沿床邊移動）
+// 選擇「坐床邊」（腳著地 Z=0，臀部貼齊床高，且可沿床邊順暢移動）
 window.sitAtBedEdge = function() {
+  walkTarget = null;
   const bed = appState.items.find(i => isBedItem(i));
   appState.human.posture = "sit";
   appState.human.sit_mode = "bed_edge";
-  appState.human.z = 0; // 腳著地
+  appState.human.z = 0;
   if (bed) {
     appState.human.seat_h = (bed.z || 0) + (bed.h || 55);
-    const pt = clampToBedEdge(appState.human.x, appState.human.y);
+    // 若人物原本離床太遠，先放到床尾正中央床邊；若已在床邊則吸附於最近床沿
+    const isNearBed = (
+      appState.human.x >= bed.x - 25 && appState.human.x <= bed.x + bed.w + 25 &&
+      appState.human.y >= bed.y - 25 && appState.human.y <= bed.y + bed.d + 25
+    );
+    const targetX = isNearBed ? appState.human.x : Math.round(bed.x + bed.w / 2);
+    const targetY = isNearBed ? appState.human.y : Math.round(bed.y + bed.d);
+    const pt = clampToBedEdge(targetX, targetY);
     appState.human.x = pt.x;
     appState.human.y = pt.y;
-    appState.human.rot = 180;
+    appState.human.rot = pt.suggestRot !== undefined ? pt.suggestRot : 180;
   } else {
     appState.human.seat_h = 45;
   }
@@ -497,37 +613,122 @@ window.sitAtBedEdge = function() {
   initHumanFormValues();
   renderFullScene();
   if (currentMode === "FPV") syncFPVCamera();
+  persistAppStateToLocal(true);
 };
 
-// 選擇「坐椅子上」（依下拉選單選擇的椅子，臀部高度等於該椅子坐墊高度，腳著地 Z=0）
-window.sitOnSelectedChair = function() {
+// 選擇「坐椅子上」（立即將人物移動至該椅子上，背靠椅背，視角朝向椅子正前方看出去！）
+window.sitOnSelectedChair = function(explicitChairId) {
+  walkTarget = null;
   renderChairSelectOptions();
-  const selId = document.getElementById("sit-chair-select").value;
-  const chair = appState.items.find(i => i.id === selId);
+  const selEl = document.getElementById("sit-chair-select");
+  const targetChairId = explicitChairId || (selEl ? selEl.value : "") || appState.human.sit_chair_id;
+  let chair = appState.items.find(i => i.id === targetChairId && isChairItem(i));
+  if (!chair) {
+    chair = appState.items.find(i => isChairItem(i));
+  }
   if (!chair) {
     showToast("💡 房間內尚無椅子，請先新增模型種類為「椅子」的物件！");
     return;
   }
+
   appState.human.posture = "sit";
   appState.human.sit_mode = "chair";
   appState.human.sit_chair_id = chair.id;
-  appState.human.x = Math.round(chair.x + chair.w / 2);
-  appState.human.y = Math.round(chair.y + chair.d / 2);
+
+  const selLeft = document.getElementById("sit-chair-select");
+  const selHud = document.getElementById("hud-chair-select");
+  if (selLeft) selLeft.value = chair.id;
+  if (selHud) selHud.value = chair.id;
+
+  // 計算背靠椅背、面向椅子正前方的精準坐姿位置與視角
+  const pose = computeChairSitPose(chair);
+  appState.human.x = pose.x;
+  appState.human.y = pose.y;
   appState.human.z = 0; // 雙腳踩在地板上
-  appState.human.seat_h = chair.seat_h || 45; // 臀部與椅墊高度一致
-  appState.human.rot = chair.rot || 0;
-  if (!appState.human.lock_horizontal) appState.human.pitch = -5;
+  appState.human.seat_h = pose.seat_h; // 臀部與椅墊高度一致
+  appState.human.rot = pose.rot; // 視角完全對齊椅子面向的正前方（背靠椅背向外看）
+  if (!appState.human.lock_horizontal) appState.human.pitch = -4; // 自然平視微略往下4度
 
   initHumanFormValues();
   renderFullScene();
-  if (currentMode === "FPV") syncFPVCamera();
+  if (currentMode === "3D" && renderer) {
+    updateThreeScene();
+  } else if (currentMode === "FPV") {
+    updateThreeScene();
+    syncFPVCamera();
+  }
+  persistAppStateToLocal(true);
+  showToast(`🪑 已坐上「${chair.name}」(背靠椅背、面向 ${pose.rot}° 視角)`);
 };
 
 window.onHudChairSelectChange = function() {
   const val = document.getElementById("hud-chair-select").value;
   if (val) {
-    document.getElementById("sit-chair-select").value = val;
-    window.sitOnSelectedChair();
+    const selLeft = document.getElementById("sit-chair-select");
+    if (selLeft) selLeft.value = val;
+    window.sitOnSelectedChair(val);
+  }
+};
+
+// 順逆時針 90 度快速翻轉功能 (支援椅子與所有可旋轉物件)
+window.rotateActiveItemBy = function(deltaDeg) {
+  const item = appState.items.find(i => i.id === activeId);
+  if (!item) {
+    showToast("💡 請先選取要旋轉的椅子或家具！");
+    return;
+  }
+  item.rot = Math.round((((item.rot || 0) + deltaDeg) % 360 + 360) % 360);
+  updateSingleItemVisual(item, "rotate");
+  showToast(`🔄 「${item.name}」已旋轉至 ${item.rot}°`);
+};
+
+// 複製與貼上功能 (支援主畫面按鈕、列表按鈕與 Ctrl+C / Ctrl+V)
+window.copySelectedItem = function(targetId) {
+  const idToCopy = targetId || activeId;
+  if (!idToCopy || idToCopy === "HUMAN") {
+    showToast("💡 請先點選要複製的家具或物件！");
+    return false;
+  }
+  const item = appState.items.find(i => i.id === idToCopy);
+  if (!item) return false;
+  clipboardItem = JSON.parse(JSON.stringify(item));
+  showToast(`📄 已複製「${item.name}」！可按 Ctrl+V 或「貼上」按鈕`);
+  return true;
+};
+
+window.pasteCopiedItem = function() {
+  if (!clipboardItem && activeId && activeId !== "HUMAN") {
+    // 若剪貼簿尚無內容但有選取物件，直接複製當前選取物件並貼上
+    const cur = appState.items.find(i => i.id === activeId);
+    if (cur) clipboardItem = JSON.parse(JSON.stringify(cur));
+  }
+  if (!clipboardItem) {
+    showToast("⚠️ 剪貼簿尚無物件，請先點選物件並按「複製 (Ctrl+C)」！");
+    return;
+  }
+  const copy = JSON.parse(JSON.stringify(clipboardItem));
+  copy.id = "item_" + Date.now() + "_" + Math.floor(Math.random() * 1000);
+  const baseName = copy.name.replace(/\(複本\d*\)$/, "");
+  copy.name = baseName + "(複本)";
+  copy.x = Math.round((copy.x || 0) + 25);
+  copy.y = Math.round((copy.y || 0) + 25);
+
+  expandedCategories.add(copy.category || appState.categories[0]);
+  findNonOverlappingSpot(copy);
+  appState.items.push(copy);
+  // 下次再按 Ctrl+V 時可連鎖偏移貼上
+  clipboardItem = JSON.parse(JSON.stringify(copy));
+  activeId = copy.id;
+  renderFullScene();
+  selectItemById(copy.id);
+  persistAppStateToLocal(true);
+  showToast(`📋 已貼上「${copy.name}」！`);
+};
+
+window.duplicateItemById = function(id, evt) {
+  if (evt) evt.stopPropagation();
+  if (window.copySelectedItem(id)) {
+    window.pasteCopiedItem();
   }
 };
 
@@ -581,6 +782,7 @@ window.toggleLockScaleBtn = function() {
   appState.room.lock_scale = !appState.room.lock_scale;
   syncLockScaleUI();
   renderFullScene();
+  persistAppStateToLocal(true);
 };
 
 function syncLockScaleUI() {
@@ -654,6 +856,7 @@ function moveItemToCategory(itemId, targetCat) {
   appState.human.z = check.baseZ;
   initHumanFormValues();
   if (renderer) updateThreeScene();
+  persistAppStateToLocal(true);
 }
 
 window.addCategory = function() {
@@ -665,6 +868,7 @@ window.addCategory = function() {
     inp.value = "";
     renderCategoryUI();
     renderRightPanel();
+    persistAppStateToLocal(true);
   }
 };
 
@@ -678,23 +882,58 @@ window.deleteCategory = function(idx) {
   appState.items.forEach(it => { if (it.category === removed) it.category = fallback; });
   renderCategoryUI();
   renderRightPanel();
+  persistAppStateToLocal(true);
 };
 
+// 全域鍵盤快捷鍵：支援 Ctrl+C / Cmd+C 複製、Ctrl+V / Cmd+V 貼上、Delete 刪除與 WASD/方向鍵移動
 window.addEventListener("keydown", function(e) {
   const tag = document.activeElement ? document.activeElement.tagName.toLowerCase() : "";
-  if (tag === "input" || tag === "textarea" || tag === "select") return;
+  const isEditingInput = (tag === "input" || tag === "textarea" || tag === "select");
+  if (isEditingInput) return;
+
+  // 電腦版 Ctrl+C / Cmd+C 複製選取物件
+  if ((e.ctrlKey || e.metaKey) && (e.key === "c" || e.key === "C")) {
+    if (activeId && activeId !== "HUMAN") {
+      e.preventDefault();
+      window.copySelectedItem(activeId);
+    }
+    return;
+  }
+
+  // 電腦版 Ctrl+V / Cmd+V 貼上物件
+  if ((e.ctrlKey || e.metaKey) && (e.key === "v" || e.key === "V")) {
+    e.preventDefault();
+    window.pasteCopiedItem();
+    return;
+  }
 
   if (e.key === "Delete" || e.key === "Backspace") {
     if (activeId && activeId !== "HUMAN") {
       e.preventDefault();
       deleteItemById(activeId);
     }
+    return;
   }
-  if (currentMode === "FPV" || currentMode === "3D") {
+
+  // 若人物處於「坐床邊」模式，即使在 2D 模式也可直接按方向鍵沿著床邊移動
+  if (currentMode === "FPV" || currentMode === "3D" || (appState.human.posture === "sit" && appState.human.sit_mode === "bed_edge")) {
     if (e.key === "w" || e.key === "W" || e.key === "ArrowUp") { fpvMoveDir.forward = 1; walkTarget = null; }
     if (e.key === "s" || e.key === "S" || e.key === "ArrowDown") { fpvMoveDir.forward = -1; walkTarget = null; }
     if (e.key === "a" || e.key === "A" || e.key === "ArrowLeft") { fpvMoveDir.right = -1; walkTarget = null; }
     if (e.key === "d" || e.key === "D" || e.key === "ArrowRight") { fpvMoveDir.right = 1; walkTarget = null; }
+
+    // 若在 2D 模式按方向鍵移動床邊人物，立即更新 2D 畫面
+    if (currentMode === "2D" && (fpvMoveDir.forward !== 0 || fpvMoveDir.right !== 0)) {
+      const yawRad = (appState.human.rot || 0) * Math.PI / 180;
+      const fx = Math.sin(yawRad), fz = -Math.cos(yawRad);
+      const rx = Math.cos(yawRad), rz = Math.sin(yawRad);
+      const step = 8;
+      const nx = appState.human.x + (fx * fpvMoveDir.forward + rx * fpvMoveDir.right) * step;
+      const ny = appState.human.y + (fz * fpvMoveDir.forward + rz * fpvMoveDir.right) * step;
+      tryMoveHumanTo(nx, ny, false);
+      initHumanFormValues();
+      renderFullScene();
+    }
   }
 });
 
@@ -735,6 +974,7 @@ function initFabric() {
     appState.room.lock_scale = e.target.checked;
     syncLockScaleUI();
     renderFullScene();
+    persistAppStateToLocal(true);
   });
 
   canvas.on('mouse:wheel', function(opt) {
@@ -812,8 +1052,21 @@ function initFabric() {
   canvas.on('object:rotating', e => onObjectLiveTransform(e, "rotate"));
   canvas.on('object:modified', onObjectModifiedComplete);
 
-  const initWalk = checkHumanWalkable(appState.human.x, appState.human.y);
-  appState.human.z = initWalk.baseZ;
+  // 初始化時若為坐椅子模式，確保人物對齊椅子位置與視角
+  if (appState.human.posture === "sit" && appState.human.sit_mode === "chair") {
+    const ch = appState.items.find(i => i.id === appState.human.sit_chair_id && isChairItem(i));
+    if (ch) {
+      const pose = computeChairSitPose(ch);
+      appState.human.x = pose.x;
+      appState.human.y = pose.y;
+      appState.human.z = 0;
+      appState.human.seat_h = pose.seat_h;
+      appState.human.rot = pose.rot;
+    }
+  } else {
+    const initWalk = checkHumanWalkable(appState.human.x, appState.human.y);
+    appState.human.z = initWalk.baseZ;
+  }
 
   renderCategoryUI();
   renderChairSelectOptions();
@@ -939,10 +1192,10 @@ function createFabricItem(item) {
   });
   subElements.push(rect);
 
-  // 若為椅子，在 2D 平面繪製椅背條，清楚標示椅背位置
+  // 若為椅子，在 2D 平面繪製椅背條，清楚標示椅背位置 (+Y 處為椅背，人物坐下時背靠此側、面向 -Y 看出去)
   if (item.item_type === "chair") {
     const backrest = new fabric.Rect({
-      width: item.w * 0.85, height: Math.max(4, item.d * 0.16),
+      width: item.w * 0.85, height: Math.max(5, item.d * 0.18),
       fill: '#0284C7', stroke: '#E0F2FE', strokeWidth: 1,
       originX: 'center', originY: 'center',
       top: item.d / 2 - Math.max(3, item.d * 0.1)
@@ -1098,6 +1351,19 @@ function onObjectSelected(e) {
     highlightRightPanel();
   } else if (target.itemId) {
     activeId = target.itemId;
+    const clickedItem = appState.items.find(i => i.id === target.itemId);
+    // 若人物目前已經處於「坐下」姿勢，且使用者點選了某張椅子，讓人物同步坐到該張椅子上並更新視角
+    if (clickedItem && isChairItem(clickedItem) && appState.human.posture === "sit") {
+      appState.human.sit_mode = "chair";
+      appState.human.sit_chair_id = clickedItem.id;
+      const pose = computeChairSitPose(clickedItem);
+      appState.human.x = pose.x;
+      appState.human.y = pose.y;
+      appState.human.z = 0;
+      appState.human.seat_h = pose.seat_h;
+      appState.human.rot = pose.rot;
+      initHumanFormValues();
+    }
     switchLeftTab('item');
     updateLeftItemPanel();
     highlightRightPanel();
@@ -1197,6 +1463,7 @@ function onObjectModifiedComplete(e) {
   }
   trashEl.classList.remove("show", "hover");
   isOverTrash = false;
+  persistAppStateToLocal(true);
   renderFullScene();
 }
 
@@ -1315,12 +1582,14 @@ document.getElementById("btn-door-flip-x").addEventListener("click", () => {
   const item = appState.items.find(i => i.id === activeId);
   if (!item) return;
   item.flip_x = !item.flip_x;
+  persistAppStateToLocal(true);
   renderFullScene();
 });
 document.getElementById("btn-door-flip-y").addEventListener("click", () => {
   const item = appState.items.find(i => i.id === activeId);
   if (!item) return;
   item.flip_y = !item.flip_y;
+  persistAppStateToLocal(true);
   renderFullScene();
 });
 
@@ -1332,6 +1601,7 @@ document.getElementById("prop-scenery-file").addEventListener("change", function
     const item = appState.items.find(i => i.id === activeId);
     if (!item) return;
     item.scenery = f.target.result;
+    persistAppStateToLocal(true);
     if (renderer) updateThreeScene();
   };
   reader.readAsDataURL(file);
@@ -1340,6 +1610,7 @@ document.getElementById("btn-reset-fuji").addEventListener("click", () => {
   const item = appState.items.find(i => i.id === activeId);
   if (!item) return;
   item.scenery = appState.default_fuji;
+  persistAppStateToLocal(true);
   if (renderer) updateThreeScene();
 });
 document.getElementById("prop-texture-file").addEventListener("change", function(e) {
@@ -1350,6 +1621,7 @@ document.getElementById("prop-texture-file").addEventListener("change", function
     const item = appState.items.find(i => i.id === activeId);
     if (!item) return;
     item.texture = f.target.result;
+    persistAppStateToLocal(true);
     renderFullScene();
   };
   reader.readAsDataURL(file);
@@ -1358,6 +1630,7 @@ document.getElementById("btn-clear-texture").addEventListener("click", () => {
   const item = appState.items.find(i => i.id === activeId);
   if (!item) return;
   item.texture = "";
+  persistAppStateToLocal(true);
   renderFullScene();
 });
 
@@ -1424,6 +1697,7 @@ window.confirmAddNewObject = function() {
   findNonOverlappingSpot(newItem);
   appState.items.push(newItem);
   activeId = newItem.id;
+  persistAppStateToLocal(true);
   renderFullScene();
   selectItemById(newItem.id);
 };
@@ -1431,6 +1705,7 @@ window.confirmAddNewObject = function() {
 window.clearWallTexture = function() {
   appState.room.wall_texture = "";
   document.getElementById("wall-texture-file").value = "";
+  persistAppStateToLocal(true);
   renderFullScene();
   if (renderer) updateThreeScene();
 };
@@ -1438,6 +1713,7 @@ window.clearWallTexture = function() {
 window.clearCeilTexture = function() {
   appState.room.ceiling_texture = "";
   document.getElementById("ceil-texture-file").value = "";
+  persistAppStateToLocal(true);
   renderFullScene();
   if (renderer) updateThreeScene();
 };
@@ -1455,6 +1731,7 @@ function deleteItemById(id, evt) {
     if (transformControl) transformControl.detach();
     onObjectDeselected();
   }
+  persistAppStateToLocal(true);
   renderFullScene();
 }
 
@@ -1463,23 +1740,16 @@ document.getElementById("btn-delete").addEventListener("click", () => {
 });
 
 document.getElementById("btn-duplicate").addEventListener("click", () => {
-  const item = appState.items.find(i => i.id === activeId);
-  if (!item) return;
-  const copy = JSON.parse(JSON.stringify(item));
-  copy.id = "item_" + Date.now();
-  copy.name = item.name + "(複本)";
-  copy.x += 25; copy.y += 25;
-  findNonOverlappingSpot(copy);
-  appState.items.push(copy);
-  activeId = copy.id;
-  renderFullScene();
-  selectItemById(copy.id);
+  if (activeId && activeId !== "HUMAN") {
+    window.duplicateItemById(activeId);
+  }
 });
 
 document.getElementById("room-editable-lock").addEventListener("change", function(e) {
   appState.room.editable = e.target.checked;
   renderVoidListUI();
   renderFullScene();
+  persistAppStateToLocal(true);
 });
 
 function renderVoidListUI() {
@@ -1513,6 +1783,7 @@ window.updateVoidField = function(idx, field, val) {
     if (val === "" || val === "-") return;
     appState.voids[idx][field] = parseFloat(val) || 0;
   }
+  persistAppStateToLocal(true);
   renderFullScene();
 };
 
@@ -1522,12 +1793,14 @@ window.addVoidArea = function() {
     return;
   }
   appState.voids.push({ id: "void_" + Date.now(), name: `留白處 ${appState.voids.length + 1}`, x: 50, y: 50, w: 80, d: 80 });
+  persistAppStateToLocal(true);
   renderVoidListUI();
   renderFullScene();
 };
 
 window.deleteVoidArea = function(idx) {
   appState.voids.splice(idx, 1);
+  persistAppStateToLocal(true);
   renderVoidListUI();
   renderFullScene();
 };
@@ -1589,6 +1862,7 @@ function syncRoomFromInputs(e) {
   appState.compass.feixing_year = parseInt(document.getElementById("feixing-year").value) || 2026;
 
   appState.items.forEach(it => enforceItemConstraints(it, "move", false));
+  persistAppStateToLocal(true);
   renderFullScene();
 }
 
@@ -1606,6 +1880,7 @@ document.getElementById("wall-texture-file").addEventListener("change", function
   const reader = new FileReader();
   reader.onload = function(f) {
     appState.room.wall_texture = f.target.result;
+    persistAppStateToLocal(true);
     if (renderer) updateThreeScene();
   };
   reader.readAsDataURL(file);
@@ -1618,6 +1893,7 @@ document.getElementById("ceil-texture-file").addEventListener("change", function
     appState.room.ceiling_texture = f.target.result;
     appState.room.show_ceiling = true;
     document.getElementById("room-show-ceiling").checked = true;
+    persistAppStateToLocal(true);
     if (renderer) updateThreeScene();
   };
   reader.readAsDataURL(file);
@@ -1630,6 +1906,7 @@ window.toggleLockHorizFPV = function() {
   }
   initHumanFormValues();
   if (currentMode === "FPV") syncFPVCamera();
+  persistAppStateToLocal(true);
 };
 
 document.getElementById("human-lock-horiz").addEventListener("change", e => {
@@ -1639,6 +1916,7 @@ document.getElementById("human-lock-horiz").addEventListener("change", e => {
   }
   initHumanFormValues();
   if (currentMode === "FPV") syncFPVCamera();
+  persistAppStateToLocal(true);
 });
 
 function initHumanFormValues() {
@@ -1721,6 +1999,7 @@ function initHumanFormValues() {
     initHumanFormValues();
     renderFullScene();
     if (currentMode === "FPV") syncFPVCamera();
+    persistAppStateToLocal(true);
   });
 });
 
@@ -1729,6 +2008,7 @@ document.getElementById("human-rot-slider").addEventListener("input", e => {
   initHumanFormValues();
   renderFullScene();
   if (currentMode === "FPV") syncFPVCamera();
+  persistAppStateToLocal(true);
 });
 
 document.getElementById("human-pitch-slider").addEventListener("input", e => {
@@ -1736,6 +2016,7 @@ document.getElementById("human-pitch-slider").addEventListener("input", e => {
   appState.human.pitch = parseFloat(e.target.value) || 0;
   initHumanFormValues();
   if (currentMode === "FPV") syncFPVCamera();
+  persistAppStateToLocal(true);
 });
 
 document.getElementById("hud-pitch-slider").addEventListener("input", e => {
@@ -1743,6 +2024,7 @@ document.getElementById("hud-pitch-slider").addEventListener("input", e => {
   appState.human.pitch = parseFloat(e.target.value) || 0;
   initHumanFormValues();
   if (currentMode === "FPV") syncFPVCamera();
+  persistAppStateToLocal(true);
 });
 
 window.setHumanPosture = function(p) {
@@ -1750,7 +2032,7 @@ window.setHumanPosture = function(p) {
   if (p === "sit") {
     renderChairSelectOptions();
     if (appState.human.sit_mode === "chair") {
-      window.sitOnSelectedChair();
+      window.sitOnSelectedChair(appState.human.sit_chair_id);
       return;
     } else {
       window.sitAtBedEdge();
@@ -1772,6 +2054,7 @@ window.setHumanPosture = function(p) {
   initHumanFormValues();
   renderFullScene();
   if (currentMode === "FPV") syncFPVCamera();
+  persistAppStateToLocal(true);
 };
 
 window.placeHumanOnBed = function(targetPosture = 'lie') {
@@ -1900,7 +2183,10 @@ function renderRightPanel() {
             <span>${item.name}</span>
             <span class="badge ${b.cls}">${b.text}</span>
           </div>
-          <button class="card-del-btn" title="刪除" onclick="deleteItemById('${item.id}', event)">🗑️</button>
+          <div style="display:flex; gap:2px; align-items:center;">
+            <button class="card-del-btn" title="複製並貼上此物件" onclick="duplicateItemById('${item.id}', event)">📋</button>
+            <button class="card-del-btn" title="刪除" onclick="deleteItemById('${item.id}', event)">🗑️</button>
+          </div>
         </div>
         <div class="dims">
           ${Math.round(item.w)}×${Math.round(item.d)}×${item.h || 30}${seatInfo} | ${item.rot || 0}°
@@ -1921,6 +2207,11 @@ function highlightRightPanel() {
 
 function selectItemById(id) {
   activeId = id;
+  const item = appState.items.find(i => i.id === id);
+  // 若目前處於「坐下」狀態且從列表中點選了椅子，自動讓人物坐過去並更新視角
+  if (item && isChairItem(item) && appState.human.posture === "sit") {
+    window.sitOnSelectedChair(item.id);
+  }
   if (currentMode === "2D") {
     const group = canvas.getObjects().find(o => o.itemId === id);
     if (group && !forcePanMode) {
@@ -1958,23 +2249,25 @@ document.getElementById("btn-pan-toggle").addEventListener("click", function() {
   renderFullScene();
 });
 
+// 儲存目前設計至 App (關閉再重開時會由 loadInitialAppState 自動載入)
 document.getElementById("btn-save-local").addEventListener("click", () => {
-  localStorage.setItem("room_planner_v9", JSON.stringify(appState));
-  alert("✅ 已成功儲存於 App 本地記憶中！");
+  persistAppStateToLocal(false);
+  const banner = document.getElementById("save-status-banner");
+  if (banner) {
+    const nowStr = new Date().toLocaleTimeString();
+    banner.innerText = `✅ 已於 ${nowStr} 儲存！關閉並重新開啟 App 將自動載入此設計。`;
+  }
 });
 
 document.getElementById("btn-load-local").addEventListener("click", () => {
-  const saved = localStorage.getItem("room_planner_v9") || localStorage.getItem("room_planner_v8") || localStorage.getItem("room_planner_v7");
+  let saved = null;
+  for (let i = 0; i < STORAGE_KEYS_LEGACY.length; i++) {
+    saved = localStorage.getItem(STORAGE_KEYS_LEGACY[i]);
+    if (saved) break;
+  }
   if (saved) {
     appState = JSON.parse(saved);
-    if (!appState.categories) appState.categories = ["床", "大型家具", "收納櫃體", "椅子", "門窗建材", "機電開關", "牆面裝飾"];
-    if (!appState.categories.includes("床")) appState.categories.unshift("床");
-    if (!appState.categories.includes("椅子")) appState.categories.splice(3, 0, "椅子");
-    appState.human = Object.assign({
-      x: 230, y: 230, z: 0, height: 178, rot: 0, pitch: 0,
-      posture: "stand", sit_mode: "bed_edge", sit_chair_id: "", seat_h: 55,
-      lock_horizontal: false, fov_h: 100, fov_up: 50, fov_down: 65
-    }, appState.human || {});
+    normalizeAppState(appState);
     appState.items.forEach(it => saveValidItemBackup(it));
     renderCategoryUI();
     renderChairSelectOptions();
@@ -1984,9 +2277,9 @@ document.getElementById("btn-load-local").addEventListener("click", () => {
     renderVoidListUI();
     renderFullScene();
     zoomToFit();
-    alert("✅ 已成功載入儲存的設計！");
+    showToast("📂 已成功載入上次儲存的設計！");
   } else {
-    alert("⚠️ 尚未找到本地存檔紀錄！");
+    showToast("⚠️ 尚未找到本地存檔紀錄！");
   }
 });
 
@@ -2007,15 +2300,9 @@ document.getElementById("file-import").addEventListener("change", function(e) {
   reader.onload = function(evt) {
     try {
       appState = JSON.parse(evt.target.result);
-      if (!appState.categories) appState.categories = ["床", "大型家具", "收納櫃體", "椅子", "門窗建材", "機電開關", "牆面裝飾"];
-      if (!appState.categories.includes("床")) appState.categories.unshift("床");
-      if (!appState.categories.includes("椅子")) appState.categories.splice(3, 0, "椅子");
-      appState.human = Object.assign({
-        x: 230, y: 230, z: 0, height: 178, rot: 0, pitch: 0,
-        posture: "stand", sit_mode: "bed_edge", sit_chair_id: "", seat_h: 55,
-        lock_horizontal: false, fov_h: 100, fov_up: 50, fov_down: 65
-      }, appState.human || {});
+      normalizeAppState(appState);
       appState.items.forEach(it => saveValidItemBackup(it));
+      persistAppStateToLocal(true);
       renderCategoryUI();
       renderChairSelectOptions();
       initRoomFormValues();
@@ -2024,7 +2311,7 @@ document.getElementById("file-import").addEventListener("change", function(e) {
       renderVoidListUI();
       renderFullScene();
       zoomToFit();
-      alert("✅ 專案檔案載入成功！");
+      showToast("✅ 專案檔案載入並儲存成功！");
     } catch(err) {
       alert("❌ 檔案格式錯誤！");
     }
@@ -2033,8 +2320,11 @@ document.getElementById("file-import").addEventListener("change", function(e) {
 });
 
 document.getElementById("btn-reset-default").addEventListener("click", () => {
-  if (confirm("確定要重置回附圖原始預設配置嗎？")) {
-    appState = JSON.parse(JSON.stringify(INITIAL_CONFIG));
+  if (confirm("確定要重置回附圖原始預設配置嗎？（這也會清除目前儲存的自動記憶）")) {
+    const baseCfg = (typeof DEFAULT_ORIGINAL_CONFIG !== "undefined") ? DEFAULT_ORIGINAL_CONFIG : INITIAL_CONFIG;
+    appState = JSON.parse(JSON.stringify(baseCfg));
+    normalizeAppState(appState);
+    STORAGE_KEYS_LEGACY.forEach(k => localStorage.removeItem(k));
     appState.items.forEach(it => saveValidItemBackup(it));
     renderCategoryUI();
     renderChairSelectOptions();
@@ -2044,6 +2334,7 @@ document.getElementById("btn-reset-default").addEventListener("click", () => {
     renderVoidListUI();
     renderFullScene();
     zoomToFit();
+    showToast("🔄 已重置回原始預設配置！");
   }
 });
 
