@@ -48,9 +48,9 @@ DEFAULT_HUMAN = {
     "rot": 0,
     "pitch": 0,
     "posture": "stand",         # "stand" | "sit" | "lie"
-    "sit_mode": "bed_edge",     # "bed_edge" | "chair"
+    "sit_mode": "bed_edge",     # "bed_edge" | "chair" | "free"
     "sit_chair_id": "chair_desk",
-    "seat_h": 55,
+    "seat_h": 55,               # 目前臀部高度 (cm)
     "lock_horizontal": False,
     "fov_h": 100,
     "fov_up": 50,
@@ -68,8 +68,6 @@ DEFAULT_VOIDS = [
 
 DEFAULT_CATEGORIES = ["床", "大型家具", "收納櫃體", "椅子", "門窗建材", "機電開關", "牆面裝飾"]
 
-DEFAULT_RECENT_COLORS = ["#38BDF8", "#FAD785", "#DC7CF5", "#A0CB88", "#F97316"]
-
 DEFAULT_ITEMS = [
     {"id": "bed", "name": "床", "category": "床", "item_type": "furniture", "x": 200, "y": 0, "z": 0, "w": 152, "d": 195, "h": 55, "seat_h": 55, "rot": 0, "color": "#FAD785", "stroke_color": "#1E293B", "texture": "", "scenery": "", "flip_x": False, "flip_y": False},
     {"id": "stand_l", "name": "床頭櫃(左)", "category": "收納櫃體", "item_type": "furniture", "x": 175, "y": 0, "z": 0, "w": 25, "d": 40, "h": 45, "seat_h": 45, "rot": 0, "color": "#FAD785", "stroke_color": "#1E293B", "texture": "", "scenery": "", "flip_x": False, "flip_y": False},
@@ -81,9 +79,11 @@ DEFAULT_ITEMS = [
     {"id": "wardrobe_white", "name": "白衣櫃", "category": "收納櫃體", "item_type": "furniture", "x": 275, "y": 305, "z": 0, "w": 60, "d": 55, "h": 190, "seat_h": 30, "rot": 0, "color": "#AADE8D", "stroke_color": "#1E293B", "texture": "", "scenery": "", "flip_x": False, "flip_y": False},
     {"id": "wardrobe_old", "name": "舊衣櫃", "category": "收納櫃體", "item_type": "furniture", "x": 335, "y": 299, "z": 0, "w": 120, "d": 61, "h": 200, "seat_h": 30, "rot": 0, "color": "#9EC484", "stroke_color": "#1E293B", "texture": "", "scenery": "", "flip_x": False, "flip_y": False},
     {"id": "bookcase", "name": "玻書櫃", "category": "收納櫃體", "item_type": "furniture", "x": 428, "y": 120, "z": 0, "w": 32, "d": 63, "h": 180, "seat_h": 30, "rot": 0, "color": "#DC7CF5", "stroke_color": "#1E293B", "texture": "", "scenery": "", "flip_x": False, "flip_y": False},
-    {"id": "win_main", "name": "窗戶", "category": "門窗建材", "item_type": "window", "x": 35, "y": 360, "z": 85, "w": 135, "d": 12, "h": 130, "seat_h": 0, "rot": 0, "color": "#F59E0B", "stroke_color": "#F59E0B", "texture": "", "scenery": FUJI_SVG, "flip_x": False, "flip_y": False, "wall": "south"},
-    {"id": "socket_wall", "name": "插座", "category": "機電開關", "item_type": "socket", "x": 325, "y": 360, "z": 35, "w": 22, "d": 12, "h": 14, "seat_h": 0, "rot": 0, "color": "#F97316", "stroke_color": "#94A3B8", "texture": "", "scenery": "", "flip_x": False, "flip_y": False, "wall": "south"}
+    {"id": "win_main", "name": "窗戶", "category": "門窗建材", "item_type": "window", "x": 35, "y": 360, "z": 85, "w": 135, "d": 12, "h": 130, "seat_h": 0, "rot": 0, "color": "#F59E0B", "stroke_color": "#1E293B", "texture": "", "scenery": FUJI_SVG, "flip_x": False, "flip_y": False, "wall": "south"},
+    {"id": "socket_wall", "name": "插座", "category": "機電開關", "item_type": "socket", "x": 325, "y": 360, "z": 35, "w": 22, "d": 12, "h": 14, "seat_h": 0, "rot": 0, "color": "#F97316", "stroke_color": "#1E293B", "texture": "", "scenery": "", "flip_x": False, "flip_y": False, "wall": "south"}
 ]
+
+DEFAULT_RECENT_COLORS = ["#38BDF8", "#FAD785", "#DC7CF5", "#A0CB88", "#F97316"]
 
 INITIAL_DATA = {
     "home_design": DEFAULT_HOME_DESIGN,
@@ -91,7 +91,7 @@ INITIAL_DATA = {
     "compass": DEFAULT_COMPASS,
     "voids": DEFAULT_VOIDS,
     "categories": DEFAULT_CATEGORIES,
-    "recent_colors": DEFAULT_RECENT_COLORS,
     "items": DEFAULT_ITEMS,
+    "recent_colors": DEFAULT_RECENT_COLORS,
     "default_fuji": FUJI_SVG
 }
