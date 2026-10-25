@@ -1,146 +1,155 @@
-// 建構具關節軸心的 3D 空間參考人型：
-// 坐姿定位：模型腳底貼合地面 (y = 0，無穿模)，坐墊接觸面基準貼齊 seat_h！
+// 取得室內設計空間設定 (支援 home_design 並自動相容舊版結構，避免讀取失敗)
+function getHomeDesignConfig() {
+  if (!appState) return { width: 460, depth: 360, height: 280, show_walls: true, show_ceiling: false, lock_scale: false };
+  if (appState.home_design) return appState.home_design;
+  const legacyKey = Object.keys(appState).find(k => appState[k] && typeof appState[k] === "object" && "width" in appState[k] && "depth" in appState[k]);
+  if (legacyKey) {
+    appState.home_design = appState[legacyKey];
+    return appState.home_design;
+  }
+  appState.home_design = { width: 460, depth: 360, height: 280, show_walls: true, show_ceiling: false, lock_scale: false };
+  return appState.home_design;
+}
+
+// 建構 3D 空間參考角色模型
 function buildRealistic3DHuman(hData) {
   const group = new THREE.Group();
   const stature = hData.height || 178;
   const s = stature / 175;
   const posture = hData.posture || "stand";
 
-  const skinMat = new THREE.MeshLambertMaterial({ color: 0xFFDCB1 });
-  const hairMat = new THREE.MeshLambertMaterial({ color: 0x1E293B });
-  const shirtMat = new THREE.MeshLambertMaterial({ color: 0x3B82F6 });
-  const pantsMat = new THREE.MeshLambertMaterial({ color: 0x1E293B });
-  const shoeMat = new THREE.MeshLambertMaterial({ color: 0xF8FAFC });
-  const eyeMat = new THREE.MeshBasicMaterial({ color: 0x0F172A });
+  const surfaceMat = new THREE.MeshLambertMaterial({ color: 0xFFDCB1 });
+  const topHairMat = new THREE.MeshLambertMaterial({ color: 0x1E293B });
+  const coatMat = new THREE.MeshLambertMaterial({ color: 0x3B82F6 });
+  const lowerMat = new THREE.MeshLambertMaterial({ color: 0x1E293B });
+  const baseShoeMat = new THREE.MeshLambertMaterial({ color: 0xF8FAFC });
+  const markerMat = new THREE.MeshBasicMaterial({ color: 0x0F172A });
 
   const rig = new THREE.Group();
 
-  const headGroup = new THREE.Group();
-  const headMesh = new THREE.Mesh(new THREE.SphereGeometry(10.5 * s, 20, 20), skinMat);
-  headGroup.add(headMesh);
-  const hairMesh = new THREE.Mesh(new THREE.SphereGeometry(11 * s, 16, 16, 0, Math.PI * 2, 0, Math.PI * 0.58), hairMat);
-  hairMesh.position.y = 1.5 * s;
-  headGroup.add(hairMesh);
+  const topGroup = new THREE.Group();
+  const sphereMesh = new THREE.Mesh(new THREE.SphereGeometry(10.5 * s, 20, 20), surfaceMat);
+  topGroup.add(sphereMesh);
+  const capMesh = new THREE.Mesh(new THREE.SphereGeometry(11 * s, 16, 16, 0, Math.PI * 2, 0, Math.PI * 0.58), topHairMat);
+  capMesh.position.y = 1.5 * s;
+  topGroup.add(capMesh);
 
-  const eyeL = new THREE.Mesh(new THREE.SphereGeometry(1.4 * s, 8, 8), eyeMat);
-  eyeL.position.set(-3.6 * s, 1 * s, -9.8 * s);
-  const eyeR = new THREE.Mesh(new THREE.SphereGeometry(1.4 * s, 8, 8), eyeMat);
-  eyeR.position.set(3.6 * s, 1 * s, -9.8 * s);
-  headGroup.add(eyeL, eyeR);
+  const sightL = new THREE.Mesh(new THREE.SphereGeometry(1.4 * s, 8, 8), markerMat);
+  sightL.position.set(-3.6 * s, 1 * s, -9.8 * s);
+  const sightR = new THREE.Mesh(new THREE.SphereGeometry(1.4 * s, 8, 8), markerMat);
+  sightR.position.set(3.6 * s, 1 * s, -9.8 * s);
+  topGroup.add(sightL, sightR);
 
-  const neckMesh = new THREE.Mesh(new THREE.CylinderGeometry(4 * s, 4.5 * s, 8 * s, 12), skinMat);
-  const upperBodyMesh = new THREE.Mesh(new THREE.BoxGeometry(32 * s, 50 * s, 17 * s), shirtMat);
-  const lowerBodyMesh = new THREE.Mesh(new THREE.BoxGeometry(30 * s, 14 * s, 16 * s), pantsMat);
+  const jointMesh = new THREE.Mesh(new THREE.CylinderGeometry(4 * s, 4.5 * s, 8 * s, 12), surfaceMat);
+  const mainBoxMesh = new THREE.Mesh(new THREE.BoxGeometry(32 * s, 50 * s, 17 * s), coatMat);
+  const baseBoxMesh = new THREE.Mesh(new THREE.BoxGeometry(30 * s, 14 * s, 16 * s), lowerMat);
 
   if (posture === "stand") {
-    headGroup.position.set(0, 158 * s, 0);
-    neckMesh.position.set(0, 145 * s, 0);
-    upperBodyMesh.position.set(0, 118 * s, 0);
-    lowerBodyMesh.position.set(0, 86 * s, 0);
+    topGroup.position.set(0, 158 * s, 0);
+    jointMesh.position.set(0, 145 * s, 0);
+    mainBoxMesh.position.set(0, 118 * s, 0);
+    baseBoxMesh.position.set(0, 86 * s, 0);
 
-    const armGeo = new THREE.CylinderGeometry(4.2 * s, 3.5 * s, 52 * s, 12);
-    const armLPivot = new THREE.Group();
-    armLPivot.position.set(-20 * s, 140 * s, 0);
-    const armLMesh = new THREE.Mesh(armGeo, shirtMat);
-    armLMesh.position.y = -26 * s;
-    armLPivot.add(armLMesh);
+    const sideGeo = new THREE.CylinderGeometry(4.2 * s, 3.5 * s, 52 * s, 12);
+    const sideLPivot = new THREE.Group();
+    sideLPivot.position.set(-20 * s, 140 * s, 0);
+    const sideLMesh = new THREE.Mesh(sideGeo, coatMat);
+    sideLMesh.position.y = -26 * s;
+    sideLPivot.add(sideLMesh);
 
-    const armRPivot = new THREE.Group();
-    armRPivot.position.set(20 * s, 140 * s, 0);
-    const armRMesh = new THREE.Mesh(armGeo, shirtMat);
-    armRMesh.position.y = -26 * s;
-    armRPivot.add(armRMesh);
+    const sideRPivot = new THREE.Group();
+    sideRPivot.position.set(20 * s, 140 * s, 0);
+    const sideRMesh = new THREE.Mesh(sideGeo, coatMat);
+    sideRMesh.position.y = -26 * s;
+    sideRPivot.add(sideRMesh);
 
-    const legGeo = new THREE.CylinderGeometry(6 * s, 4.5 * s, 74 * s, 12);
+    const supportGeo = new THREE.CylinderGeometry(6 * s, 4.5 * s, 74 * s, 12);
     const shoeGeo = new THREE.BoxGeometry(10 * s, 7 * s, 22 * s);
 
-    const legLPivot = new THREE.Group();
-    legLPivot.position.set(-8.5 * s, 80 * s, 0);
-    const legLMesh = new THREE.Mesh(legGeo, pantsMat);
-    legLMesh.position.y = -37 * s;
-    const shoeL = new THREE.Mesh(shoeGeo, shoeMat);
+    const supportLPivot = new THREE.Group();
+    supportLPivot.position.set(-8.5 * s, 80 * s, 0);
+    const supportLMesh = new THREE.Mesh(supportGeo, lowerMat);
+    supportLMesh.position.y = -37 * s;
+    const shoeL = new THREE.Mesh(shoeGeo, baseShoeMat);
     shoeL.position.set(0, -76.5 * s, -4 * s);
-    legLPivot.add(legLMesh, shoeL);
+    supportLPivot.add(supportLMesh, shoeL);
 
-    const legRPivot = new THREE.Group();
-    legRPivot.position.set(8.5 * s, 80 * s, 0);
-    const legRMesh = new THREE.Mesh(legGeo, pantsMat);
-    legRMesh.position.y = -37 * s;
-    const shoeR = new THREE.Mesh(shoeGeo, shoeMat);
+    const supportRPivot = new THREE.Group();
+    supportRPivot.position.set(8.5 * s, 80 * s, 0);
+    const supportRMesh = new THREE.Mesh(supportGeo, lowerMat);
+    supportRMesh.position.y = -37 * s;
+    const shoeR = new THREE.Mesh(shoeGeo, baseShoeMat);
     shoeR.position.set(0, -76.5 * s, -4 * s);
-    legRPivot.add(legRMesh, shoeR);
+    supportRPivot.add(supportRMesh, shoeR);
 
-    rig.add(headGroup, neckMesh, upperBodyMesh, lowerBodyMesh, armLPivot, armRPivot, legLPivot, legRPivot);
-    group.userData.limbs = { armL: armLPivot, armR: armRPivot, legL: legLPivot, legR: legRPivot };
+    rig.add(topGroup, jointMesh, mainBoxMesh, baseBoxMesh, sideLPivot, sideRPivot, supportLPivot, supportRPivot);
+    group.userData.limbs = { armL: sideLPivot, armR: sideRPivot, legL: supportLPivot, legR: supportRPivot };
 
   } else if (posture === "sit") {
     const seatH = Math.max(25, hData.seat_h || 45);
     const shoeH = 7 * s;
 
-    // 雙腳水平著地
     const shoeGeo = new THREE.BoxGeometry(10 * s, shoeH, 22 * s);
-    const shoeL = new THREE.Mesh(shoeGeo, shoeMat);
+    const shoeL = new THREE.Mesh(shoeGeo, baseShoeMat);
     shoeL.position.set(-8.5 * s, shoeH / 2, -28 * s);
-    const shoeR = new THREE.Mesh(shoeGeo, shoeMat);
+    const shoeR = new THREE.Mesh(shoeGeo, baseShoeMat);
     shoeR.position.set(8.5 * s, shoeH / 2, -28 * s);
 
-    // 下肢立體柱由足部垂直延伸至座墊高度
-    const lowerLegLen = Math.max(12, seatH - shoeH);
-    const lowerLegGeo = new THREE.CylinderGeometry(5 * s, 4 * s, lowerLegLen, 12);
-    const lowerLegL = new THREE.Mesh(lowerLegGeo, pantsMat);
-    lowerLegL.position.set(-8.5 * s, shoeH + lowerLegLen / 2, -24 * s);
-    const lowerLegR = new THREE.Mesh(lowerLegGeo, pantsMat);
-    lowerLegR.position.set(8.5 * s, shoeH + lowerLegLen / 2, -24 * s);
+    const vertLen = Math.max(12, seatH - shoeH);
+    const vertGeo = new THREE.CylinderGeometry(5 * s, 4 * s, vertLen, 12);
+    const vertL = new THREE.Mesh(vertGeo, lowerMat);
+    vertL.position.set(-8.5 * s, shoeH + vertLen / 2, -24 * s);
+    const vertR = new THREE.Mesh(vertGeo, lowerMat);
+    vertR.position.set(8.5 * s, shoeH + vertLen / 2, -24 * s);
 
-    // 水平段骨架對齊 seatH
-    const upperLegGeo = new THREE.BoxGeometry(11 * s, 11 * s, 32 * s);
-    const upperLegL = new THREE.Mesh(upperLegGeo, pantsMat);
-    upperLegL.position.set(-8.5 * s, seatH + 5.5 * s, -12 * s);
-    const upperLegR = new THREE.Mesh(upperLegGeo, pantsMat);
-    upperLegR.position.set(8.5 * s, seatH + 5.5 * s, -12 * s);
+    const horizGeo = new THREE.BoxGeometry(11 * s, 11 * s, 32 * s);
+    const horizL = new THREE.Mesh(horizGeo, lowerMat);
+    horizL.position.set(-8.5 * s, seatH + 5.5 * s, -12 * s);
+    const horizR = new THREE.Mesh(horizGeo, lowerMat);
+    horizR.position.set(8.5 * s, seatH + 5.5 * s, -12 * s);
 
-    lowerBodyMesh.position.set(0, seatH + 7 * s, 0);
-    upperBodyMesh.position.set(0, seatH + 37 * s, 0);
-    neckMesh.position.set(0, seatH + 65 * s, 0);
-    headGroup.position.set(0, seatH + 77 * s, 0);
+    baseBoxMesh.position.set(0, seatH + 7 * s, 0);
+    mainBoxMesh.position.set(0, seatH + 37 * s, 0);
+    jointMesh.position.set(0, seatH + 65 * s, 0);
+    topGroup.position.set(0, seatH + 77 * s, 0);
 
-    const armGeo = new THREE.CylinderGeometry(4.2 * s, 3.5 * s, 48 * s, 12);
-    const armL = new THREE.Mesh(armGeo, shirtMat);
-    armL.position.set(-20 * s, seatH + 37 * s, -6 * s);
-    armL.rotation.x = 0.35;
-    const armR = new THREE.Mesh(armGeo, shirtMat);
-    armR.position.set(20 * s, seatH + 37 * s, -6 * s);
-    armR.rotation.x = 0.35;
+    const sideGeo = new THREE.CylinderGeometry(4.2 * s, 3.5 * s, 48 * s, 12);
+    const sideL = new THREE.Mesh(sideGeo, coatMat);
+    sideL.position.set(-20 * s, seatH + 37 * s, -6 * s);
+    sideL.rotation.x = 0.35;
+    const sideR = new THREE.Mesh(sideGeo, coatMat);
+    sideR.position.set(20 * s, seatH + 37 * s, -6 * s);
+    sideR.rotation.x = 0.35;
 
-    rig.add(headGroup, neckMesh, upperBodyMesh, lowerBodyMesh, armL, armR, upperLegL, upperLegR, lowerLegL, lowerLegR, shoeL, shoeR);
+    rig.add(topGroup, jointMesh, mainBoxMesh, baseBoxMesh, sideL, sideR, horizL, horizR, vertL, vertR, shoeL, shoeR);
 
   } else {
-    headGroup.position.set(0, 18 * s, 52 * s);
-    headGroup.rotation.x = Math.PI / 2.3;
-    neckMesh.position.set(0, 12 * s, 38 * s);
-    neckMesh.rotation.x = Math.PI / 2;
-    upperBodyMesh.position.set(0, 10 * s, 8 * s);
-    upperBodyMesh.rotation.x = Math.PI / 2;
-    lowerBodyMesh.position.set(0, 9 * s, -22 * s);
-    lowerBodyMesh.rotation.x = Math.PI / 2;
+    topGroup.position.set(0, 18 * s, 52 * s);
+    topGroup.rotation.x = Math.PI / 2.3;
+    jointMesh.position.set(0, 12 * s, 38 * s);
+    jointMesh.rotation.x = Math.PI / 2;
+    mainBoxMesh.position.set(0, 10 * s, 8 * s);
+    mainBoxMesh.rotation.x = Math.PI / 2;
+    baseBoxMesh.position.set(0, 9 * s, -22 * s);
+    baseBoxMesh.rotation.x = Math.PI / 2;
 
-    const armGeo = new THREE.CylinderGeometry(4.2 * s, 3.5 * s, 52 * s, 12);
-    const armL = new THREE.Mesh(armGeo, shirtMat);
-    armL.position.set(-21 * s, 9 * s, 8 * s);
-    armL.rotation.x = Math.PI / 2;
-    const armR = new THREE.Mesh(armGeo, shirtMat);
-    armR.position.set(21 * s, 9 * s, 8 * s);
-    armR.rotation.x = Math.PI / 2;
+    const sideGeo = new THREE.CylinderGeometry(4.2 * s, 3.5 * s, 52 * s, 12);
+    const sideL = new THREE.Mesh(sideGeo, coatMat);
+    sideL.position.set(-21 * s, 9 * s, 8 * s);
+    sideL.rotation.x = Math.PI / 2;
+    const sideR = new THREE.Mesh(sideGeo, coatMat);
+    sideR.position.set(21 * s, 9 * s, 8 * s);
+    sideR.rotation.x = Math.PI / 2;
 
-    const legGeo = new THREE.CylinderGeometry(5.8 * s, 4.5 * s, 70 * s, 12);
-    const legL = new THREE.Mesh(legGeo, pantsMat);
-    legL.rotation.x = Math.PI / 2;
-    legL.position.set(-8.5 * s, 8 * s, -62 * s);
-    const legR = new THREE.Mesh(legGeo, pantsMat);
-    legR.rotation.x = Math.PI / 2;
-    legR.position.set(8.5 * s, 8 * s, -62 * s);
+    const supportGeo = new THREE.CylinderGeometry(5.8 * s, 4.5 * s, 70 * s, 12);
+    const supportL = new THREE.Mesh(supportGeo, lowerMat);
+    supportL.rotation.x = Math.PI / 2;
+    supportL.position.set(-8.5 * s, 8 * s, -62 * s);
+    const supportR = new THREE.Mesh(supportGeo, lowerMat);
+    supportR.rotation.x = Math.PI / 2;
+    supportR.position.set(8.5 * s, 8 * s, -62 * s);
 
-    rig.add(headGroup, neckMesh, upperBodyMesh, lowerBodyMesh, armL, armR, legL, legR);
+    rig.add(topGroup, jointMesh, mainBoxMesh, baseBoxMesh, sideL, sideR, supportL, supportR);
   }
 
   const groupBaseY = (posture === "sit") ? 0 : (hData.z || 0);
@@ -208,6 +217,7 @@ function applyCameraProjection() {
 
 function attachGizmoWithRules(mesh) {
   if (!transformControl || !mesh) return;
+  const homeDesign = getHomeDesignConfig();
   transformControl.attach(mesh);
 
   if (mesh.userData.isHuman) {
@@ -222,7 +232,7 @@ function attachGizmoWithRules(mesh) {
   const item = appState.items.find(i => i.id === mesh.userData.itemId);
   const t = item ? (item.item_type || "furniture") : "furniture";
 
-  if (gizmoMode === "scale" && appState.room.lock_scale) {
+  if (gizmoMode === "scale" && homeDesign.lock_scale) {
     showToast("🔒 已鎖定既有物品縮放！");
     transformControl.setMode("translate");
   } else {
@@ -247,11 +257,12 @@ function attachGizmoWithRules(mesh) {
 
 function initThree() {
   const container = document.getElementById("three-container");
+  const homeDesign = getHomeDesignConfig();
   scene = new THREE.Scene();
   scene.background = new THREE.Color(0x0B0F17);
 
   camera = new THREE.PerspectiveCamera(65, container.clientWidth / container.clientHeight, 2, 6000);
-  camera.position.set(appState.room.width / 2, 420, appState.room.depth + 340);
+  camera.position.set(homeDesign.width / 2, 420, homeDesign.depth + 340);
 
   renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setSize(container.clientWidth, container.clientHeight);
@@ -260,22 +271,22 @@ function initThree() {
 
   controls = new THREE.OrbitControls(camera, renderer.domElement);
   controls.enableDamping = true;
-  controls.target.set(appState.room.width / 2, 60, appState.room.depth / 2);
+  controls.target.set(homeDesign.width / 2, 60, homeDesign.depth / 2);
 
   transformControl = new THREE.TransformControls(camera, renderer.domElement);
   transformControl.addEventListener('dragging-changed', function(event) {
     if (currentMode === "3D") controls.enabled = !event.value;
     const trashEl = document.getElementById("trash-dropzone");
     if (event.value && activeId && activeId !== "HUMAN") {
-      trashEl.classList.add("show");
+      if (trashEl) trashEl.classList.add("show");
     } else {
       if (isOverTrash && activeId && activeId !== "HUMAN") {
         deleteItemById(activeId);
-        trashEl.classList.remove("show", "hover");
+        if (trashEl) trashEl.classList.remove("show", "hover");
         isOverTrash = false;
         return;
       }
-      trashEl.classList.remove("show", "hover");
+      if (trashEl) trashEl.classList.remove("show", "hover");
       isOverTrash = false;
 
       if (!event.value && activeId && activeId !== "HUMAN") {
@@ -287,6 +298,7 @@ function initThree() {
   transformControl.addEventListener('change', function() {
     if (!transformControl.object || !transformControl.dragging) return;
     const obj = transformControl.object;
+    const hd = getHomeDesignConfig();
 
     if (obj.userData.isHuman) {
       obj.scale.set(1, 1, 1);
@@ -304,10 +316,10 @@ function initThree() {
 
       const curM = transformControl.getMode();
       let mode = "move";
-      if (curM === "scale" && !appState.room.lock_scale) {
+      if (curM === "scale" && !hd.lock_scale) {
         mode = "scale";
         item.w = Math.max(5, Math.round(obj.userData.origW * Math.abs(obj.scale.x)));
-        item.h = Math.max(5, Math.min(appState.room.height, Math.round(obj.userData.origH * Math.abs(obj.scale.y))));
+        item.h = Math.max(5, Math.min(hd.height, Math.round(obj.userData.origH * Math.abs(obj.scale.y))));
         item.d = Math.max(5, Math.round(obj.userData.origD * Math.abs(obj.scale.z)));
       } else if (curM === "rotate") {
         mode = "rotate";
@@ -316,7 +328,7 @@ function initThree() {
       item.x = Math.round(obj.position.x - item.w / 2);
       item.y = Math.round(obj.position.z - item.d / 2);
       if (isZAdjustableWallType(item.item_type)) {
-        item.z = Math.max(0, Math.min(appState.room.height - (item.h || 30), Math.round(obj.position.y - (item.h || 30) / 2)));
+        item.z = Math.max(0, Math.min(hd.height - (item.h || 30), Math.round(obj.position.y - (item.h || 30) / 2)));
       } else {
         item.z = 0;
       }
@@ -414,8 +426,7 @@ function initThree() {
           return;
         } else if (hit.userData.itemId) {
           const hitItem = appState.items.find(i => i.id === hit.userData.itemId);
-          // 若處於坐姿且點選了椅子，直接入座並對齊向外視角
-          if (hitItem && isChairItem(hitItem) && appState.human.posture === "sit") {
+          if (hitItem && typeof isChairItem === "function" && isChairItem(hitItem) && appState.human.posture === "sit") {
             window.sitOnSelectedChair(hitItem.id);
             return;
           }
@@ -471,7 +482,8 @@ function triggerWalkToTarget(tx, ty) {
 }
 
 window.set3DGizmoMode = function(mode) {
-  if (mode === "scale" && appState.room.lock_scale) {
+  const homeDesign = getHomeDesignConfig();
+  if (mode === "scale" && homeDesign.lock_scale) {
     showToast("🔒 已鎖定既有物品縮放，請先解除鎖定！");
     return;
   }
@@ -493,7 +505,8 @@ function updateThreeScene() {
   const keep = [scene.children[0], scene.children[1], transformControl];
   scene.children = keep.filter(Boolean);
 
-  const rw = appState.room.width, rd = appState.room.depth, rh = appState.room.height;
+  const homeDesign = getHomeDesignConfig();
+  const rw = homeDesign.width, rd = homeDesign.depth, rh = homeDesign.height;
   const texLoader = new THREE.TextureLoader();
 
   const floorGeo = new THREE.PlaneGeometry(rw, rd);
@@ -511,13 +524,13 @@ function updateThreeScene() {
   if (walkTarget) targetRingMesh.position.set(walkTarget.x, (appState.human.z || 0) + 1.5, walkTarget.y);
   scene.add(targetRingMesh);
 
-  if (appState.room.show_walls) {
+  if (homeDesign.show_walls) {
     let wallMat;
-    if (appState.room.wall_texture) {
-      wallMat = new THREE.MeshLambertMaterial({ map: texLoader.load(appState.room.wall_texture), side: THREE.DoubleSide });
+    if (homeDesign.wall_texture) {
+      wallMat = new THREE.MeshLambertMaterial({ map: texLoader.load(homeDesign.wall_texture), side: THREE.DoubleSide });
     } else {
       wallMat = new THREE.MeshLambertMaterial({
-        color: appState.room.wall_color || "#F8FAFC",
+        color: homeDesign.wall_color || "#F8FAFC",
         side: THREE.DoubleSide,
         transparent: currentMode === "3D",
         opacity: currentMode === "3D" ? 0.52 : 1.0
@@ -536,12 +549,12 @@ function updateThreeScene() {
     scene.add(wNorth, wSouth, wWest, wEast);
   }
 
-  if (appState.room.show_ceiling) {
+  if (homeDesign.show_ceiling) {
     let ceilMat;
-    if (appState.room.ceiling_texture) {
-      ceilMat = new THREE.MeshLambertMaterial({ map: texLoader.load(appState.room.ceiling_texture), side: THREE.DoubleSide });
+    if (homeDesign.ceiling_texture) {
+      ceilMat = new THREE.MeshLambertMaterial({ map: texLoader.load(homeDesign.ceiling_texture), side: THREE.DoubleSide });
     } else {
-      ceilMat = new THREE.MeshLambertMaterial({ color: appState.room.ceiling_color || "#FFFFFF", side: THREE.DoubleSide });
+      ceilMat = new THREE.MeshLambertMaterial({ color: homeDesign.ceiling_color || "#FFFFFF", side: THREE.DoubleSide });
     }
     const ceilMesh = new THREE.Mesh(new THREE.PlaneGeometry(rw, rd), ceilMat);
     ceilMesh.rotation.x = Math.PI / 2;
@@ -553,12 +566,11 @@ function updateThreeScene() {
   wallLine.position.set(rw / 2, rh / 2, rd / 2);
   scene.add(wallLine);
 
-  appState.voids.forEach(v => {
+  (appState.voids || []).forEach(v => {
     const voidMesh = new THREE.Mesh(new THREE.PlaneGeometry(v.w, v.d), new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide }));
     voidMesh.rotation.x = -Math.PI / 2;
     voidMesh.position.set(v.x + v.w / 2, 0.4, v.y + v.d / 2);
     scene.add(voidMesh);
-    // 留白處在 3D 下也支援點選通行
     walkable3DMeshes.push(voidMesh);
   });
 
@@ -837,6 +849,7 @@ document.getElementById("btn-mode-2d").addEventListener("click", () => {
 document.getElementById("btn-mode-3d").addEventListener("click", () => {
   currentMode = "3D";
   walkTarget = null;
+  const homeDesign = getHomeDesignConfig();
   document.getElementById("btn-mode-3d").classList.add("active");
   document.getElementById("btn-mode-2d").classList.remove("active");
   document.getElementById("btn-mode-fpv").classList.remove("active");
@@ -849,8 +862,8 @@ document.getElementById("btn-mode-3d").addEventListener("click", () => {
   if (!renderer) initThree();
   applyCameraProjection();
   controls.enabled = true;
-  camera.position.set(appState.room.width / 2, 420, appState.room.depth + 340);
-  controls.target.set(appState.room.width / 2, 60, appState.room.depth / 2);
+  camera.position.set(homeDesign.width / 2, 420, homeDesign.depth + 340);
+  controls.target.set(homeDesign.width / 2, 60, homeDesign.depth / 2);
   updateThreeScene();
 });
 
