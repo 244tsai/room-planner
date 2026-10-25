@@ -29,10 +29,11 @@ FUJI_SVG = """data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' vi
 <circle cx='50' cy='100' r='30' fill='%23ff9ebb' opacity='0.75'/>
 </svg>"""
 
-DEFAULT_ROOM = {
+DEFAULT_HOME_DESIGN = {
     "width": 460, "depth": 360, "height": 280,
     "editable": False,
     "lock_scale": False,
+    "auto_save": False,
     "show_walls": True,
     "show_ceiling": False,
     "wall_color": "#F8FAFC",
@@ -47,13 +48,13 @@ DEFAULT_HUMAN = {
     "rot": 0,
     "pitch": 0,
     "posture": "stand",         # "stand" | "sit" | "lie"
-    "sit_mode": "bed_edge",     # "bed_edge" (坐床邊) | "chair" (坐椅子) | "free" (原地坐)
+    "sit_mode": "bed_edge",     # "bed_edge" | "chair"
     "sit_chair_id": "chair_desk",
-    "seat_h": 55,               # 目前坐姿臀部離地高度 (cm)
-    "lock_horizontal": false if False else False,
-    "fov_h": 100,               # 預設左右視角 100度
-    "fov_up": 50,               # 預設上視角 50度
-    "fov_down": 65              # 預設下視角 65度
+    "seat_h": 55,
+    "lock_horizontal": False,
+    "fov_h": 100,
+    "fov_up": 50,
+    "fov_down": 65
 }
 
 DEFAULT_COMPASS = {
@@ -67,27 +68,30 @@ DEFAULT_VOIDS = [
 
 DEFAULT_CATEGORIES = ["床", "大型家具", "收納櫃體", "椅子", "門窗建材", "機電開關", "牆面裝飾"]
 
+DEFAULT_RECENT_COLORS = ["#38BDF8", "#FAD785", "#DC7CF5", "#A0CB88", "#F97316"]
+
 DEFAULT_ITEMS = [
-    {"id": "bed", "name": "床", "category": "床", "item_type": "furniture", "x": 200, "y": 0, "z": 0, "w": 152, "d": 195, "h": 55, "seat_h": 55, "rot": 0, "color": "#FAD785", "texture": "", "scenery": "", "flip_x": False, "flip_y": False},
-    {"id": "stand_l", "name": "床頭櫃(左)", "category": "收納櫃體", "item_type": "furniture", "x": 175, "y": 0, "z": 0, "w": 25, "d": 40, "h": 45, "seat_h": 45, "rot": 0, "color": "#FAD785", "texture": "", "scenery": "", "flip_x": False, "flip_y": False},
-    {"id": "stand_r", "name": "床頭櫃(右)", "category": "收納櫃體", "item_type": "furniture", "x": 352, "y": 0, "z": 0, "w": 25, "d": 40, "h": 45, "seat_h": 45, "rot": 0, "color": "#FAD785", "texture": "", "scenery": "", "flip_x": False, "flip_y": False},
-    {"id": "wardrobe_new", "name": "新衣櫃", "category": "收納櫃體", "item_type": "furniture", "x": 0, "y": 0, "z": 0, "w": 121, "d": 72, "h": 210, "seat_h": 30, "rot": 0, "color": "#A0CB88", "texture": "", "scenery": "", "flip_x": False, "flip_y": False},
-    {"id": "desk", "name": "書桌", "category": "大型家具", "item_type": "furniture", "x": 0, "y": 135, "z": 0, "w": 123, "d": 71, "h": 75, "seat_h": 75, "rot": 0, "color": "#8232FA", "texture": "", "scenery": "", "flip_x": False, "flip_y": False},
-    {"id": "chair_desk", "name": "書桌椅", "category": "椅子", "item_type": "chair", "x": 35, "y": 210, "z": 0, "w": 50, "d": 50, "h": 85, "seat_h": 45, "rot": 180, "color": "#38BDF8", "texture": "", "scenery": "", "flip_x": False, "flip_y": False},
-    {"id": "drybox", "name": "防潮箱", "category": "收納櫃體", "item_type": "furniture", "x": 235, "y": 315, "z": 0, "w": 40, "d": 45, "h": 50, "seat_h": 50, "rot": 0, "color": "#DC7CF5", "texture": "", "scenery": "", "flip_x": False, "flip_y": False},
-    {"id": "wardrobe_white", "name": "白衣櫃", "category": "收納櫃體", "item_type": "furniture", "x": 275, "y": 305, "z": 0, "w": 60, "d": 55, "h": 190, "seat_h": 30, "rot": 0, "color": "#AADE8D", "texture": "", "scenery": "", "flip_x": False, "flip_y": False},
-    {"id": "wardrobe_old", "name": "舊衣櫃", "category": "收納櫃體", "item_type": "furniture", "x": 335, "y": 299, "z": 0, "w": 120, "d": 61, "h": 200, "seat_h": 30, "rot": 0, "color": "#9EC484", "texture": "", "scenery": "", "flip_x": False, "flip_y": False},
-    {"id": "bookcase", "name": "玻書櫃", "category": "收納櫃體", "item_type": "furniture", "x": 428, "y": 120, "z": 0, "w": 32, "d": 63, "h": 180, "seat_h": 30, "rot": 0, "color": "#DC7CF5", "texture": "", "scenery": "", "flip_x": False, "flip_y": False},
-    {"id": "win_main", "name": "窗戶", "category": "門窗建材", "item_type": "window", "x": 35, "y": 360, "z": 85, "w": 135, "d": 12, "h": 130, "seat_h": 0, "rot": 0, "color": "#F59E0B", "texture": "", "scenery": FUJI_SVG, "flip_x": False, "flip_y": False, "wall": "south"},
-    {"id": "socket_wall", "name": "插座", "category": "機電開關", "item_type": "socket", "x": 325, "y": 360, "z": 35, "w": 22, "d": 12, "h": 14, "seat_h": 0, "rot": 0, "color": "#F97316", "texture": "", "scenery": "", "flip_x": False, "flip_y": False, "wall": "south"}
+    {"id": "bed", "name": "床", "category": "床", "item_type": "furniture", "x": 200, "y": 0, "z": 0, "w": 152, "d": 195, "h": 55, "seat_h": 55, "rot": 0, "color": "#FAD785", "stroke_color": "#1E293B", "texture": "", "scenery": "", "flip_x": False, "flip_y": False},
+    {"id": "stand_l", "name": "床頭櫃(左)", "category": "收納櫃體", "item_type": "furniture", "x": 175, "y": 0, "z": 0, "w": 25, "d": 40, "h": 45, "seat_h": 45, "rot": 0, "color": "#FAD785", "stroke_color": "#1E293B", "texture": "", "scenery": "", "flip_x": False, "flip_y": False},
+    {"id": "stand_r", "name": "床頭櫃(右)", "category": "收納櫃體", "item_type": "furniture", "x": 352, "y": 0, "z": 0, "w": 25, "d": 40, "h": 45, "seat_h": 45, "rot": 0, "color": "#FAD785", "stroke_color": "#1E293B", "texture": "", "scenery": "", "flip_x": False, "flip_y": False},
+    {"id": "wardrobe_new", "name": "新衣櫃", "category": "收納櫃體", "item_type": "furniture", "x": 0, "y": 0, "z": 0, "w": 121, "d": 72, "h": 210, "seat_h": 30, "rot": 0, "color": "#A0CB88", "stroke_color": "#1E293B", "texture": "", "scenery": "", "flip_x": False, "flip_y": False},
+    {"id": "desk", "name": "書桌", "category": "大型家具", "item_type": "furniture", "x": 0, "y": 135, "z": 0, "w": 123, "d": 71, "h": 75, "seat_h": 75, "rot": 0, "color": "#8232FA", "stroke_color": "#1E293B", "texture": "", "scenery": "", "flip_x": False, "flip_y": False},
+    {"id": "chair_desk", "name": "書桌椅", "category": "椅子", "item_type": "chair", "x": 35, "y": 210, "z": 0, "w": 50, "d": 50, "h": 85, "seat_h": 45, "rot": 180, "color": "#38BDF8", "stroke_color": "#1E293B", "texture": "", "scenery": "", "flip_x": False, "flip_y": False},
+    {"id": "drybox", "name": "防潮箱", "category": "收納櫃體", "item_type": "furniture", "x": 235, "y": 315, "z": 0, "w": 40, "d": 45, "h": 50, "seat_h": 50, "rot": 0, "color": "#DC7CF5", "stroke_color": "#1E293B", "texture": "", "scenery": "", "flip_x": False, "flip_y": False},
+    {"id": "wardrobe_white", "name": "白衣櫃", "category": "收納櫃體", "item_type": "furniture", "x": 275, "y": 305, "z": 0, "w": 60, "d": 55, "h": 190, "seat_h": 30, "rot": 0, "color": "#AADE8D", "stroke_color": "#1E293B", "texture": "", "scenery": "", "flip_x": False, "flip_y": False},
+    {"id": "wardrobe_old", "name": "舊衣櫃", "category": "收納櫃體", "item_type": "furniture", "x": 335, "y": 299, "z": 0, "w": 120, "d": 61, "h": 200, "seat_h": 30, "rot": 0, "color": "#9EC484", "stroke_color": "#1E293B", "texture": "", "scenery": "", "flip_x": False, "flip_y": False},
+    {"id": "bookcase", "name": "玻書櫃", "category": "收納櫃體", "item_type": "furniture", "x": 428, "y": 120, "z": 0, "w": 32, "d": 63, "h": 180, "seat_h": 30, "rot": 0, "color": "#DC7CF5", "stroke_color": "#1E293B", "texture": "", "scenery": "", "flip_x": False, "flip_y": False},
+    {"id": "win_main", "name": "窗戶", "category": "門窗建材", "item_type": "window", "x": 35, "y": 360, "z": 85, "w": 135, "d": 12, "h": 130, "seat_h": 0, "rot": 0, "color": "#F59E0B", "stroke_color": "#F59E0B", "texture": "", "scenery": FUJI_SVG, "flip_x": False, "flip_y": False, "wall": "south"},
+    {"id": "socket_wall", "name": "插座", "category": "機電開關", "item_type": "socket", "x": 325, "y": 360, "z": 35, "w": 22, "d": 12, "h": 14, "seat_h": 0, "rot": 0, "color": "#F97316", "stroke_color": "#94A3B8", "texture": "", "scenery": "", "flip_x": False, "flip_y": False, "wall": "south"}
 ]
 
 INITIAL_DATA = {
-    "room": DEFAULT_ROOM,
+    "home_design": DEFAULT_HOME_DESIGN,
     "human": DEFAULT_HUMAN,
     "compass": DEFAULT_COMPASS,
     "voids": DEFAULT_VOIDS,
     "categories": DEFAULT_CATEGORIES,
+    "recent_colors": DEFAULT_RECENT_COLORS,
     "items": DEFAULT_ITEMS,
     "default_fuji": FUJI_SVG
 }
