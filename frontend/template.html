@@ -55,7 +55,7 @@
       </div>
 
       <div id="no-selection" style="color: #94A3B8; font-size: 11px; margin: 4px 0; text-align: center; line-height: 1.4; background: #1F232B; padding: 8px; border-radius: 6px; border: 1px dashed #334155;">
-        👈 <b>點選畫面或列表中的物件進行編輯</b><br>💡 碰到牆壁或家具會自動貼齊卡住；拉超過牆壁 3/4 才移至房外備用區！
+        👈 <b>點選畫面或列表中的物件進行編輯</b><br>💡 支援 <b>Ctrl+C 複製 / Ctrl+V 貼上</b>；碰到牆壁或家具會自動貼齊！
       </div>
 
       <div id="prop-editor" style="display: none;">
@@ -106,6 +106,10 @@
 
         <div class="field-group" style="background:#1C2029; padding:7px; border-radius:6px; border:1px solid #2E3440;">
           <label><span>🔄 旋轉角度</span><span id="prop-rot-val" style="color:#60A5FA;font-weight:bold;">0°</span></label>
+          <div style="display:flex; gap:5px; margin:3px 0;">
+            <button type="button" onclick="rotateActiveItemBy(-90)" style="flex:1; background:#1E293B; border-color:#3B82F6;">↺ 逆時針 90°</button>
+            <button type="button" onclick="rotateActiveItemBy(90)" style="flex:1; background:#1E293B; border-color:#3B82F6;">↻ 順時針 90°</button>
+          </div>
           <input type="range" id="prop-rot-slider" min="0" max="360" value="0" style="width:100%;">
           <input type="number" id="prop-rot" min="0" max="360">
         </div>
@@ -136,7 +140,11 @@
         </div>
 
         <div style="display: flex; flex-direction: column; gap: 5px; margin-top: 6px;">
-          <button id="btn-duplicate" style="width: 100%;">📋 複製此物件</button>
+          <div style="display:flex; gap:5px;">
+            <button onclick="copySelectedItem()" style="flex:1; background:#1E293B; border-color:#3B82F6;">📄 複製 (Ctrl+C)</button>
+            <button onclick="pasteCopiedItem()" style="flex:1; background:#059669; border-color:#059669;">📋 貼上 (Ctrl+V)</button>
+          </div>
+          <button id="btn-duplicate" style="width: 100%;">📑 直接複製並貼上此物件</button>
           <button id="btn-delete" class="danger" style="width: 100%;">🗑️ 刪除此物件 (Del)</button>
         </div>
       </div>
@@ -268,10 +276,10 @@
 
       <!-- 坐下模式專屬選項：坐床邊 (可沿床邊移動) vs 坐椅子上 (下拉選擇椅子) -->
       <div id="sit-options-box" style="display:none; background:#172554; border:1px solid #3B82F6; border-radius:6px; padding:8px; flex-direction:column; gap:6px;">
-        <div style="font-size:11px; font-weight:bold; color:#93C5FD;">🪑 坐姿位置選擇 (腳著地、臀部貼齊座高)</div>
+        <div style="font-size:11px; font-weight:bold; color:#93C5FD;">🪑 坐姿位置選擇 (腳著地、背靠椅背/床沿向外看)</div>
         <div class="field-row">
-          <button id="btn-sit-bed-edge" onclick="sitAtBedEdge()" style="width:100%;">🛏️ 坐床邊 (可沿床邊移動)</button>
-          <button id="btn-sit-on-chair" onclick="sitOnSelectedChair()" style="width:100%;">🪑 坐椅子上</button>
+          <button id="btn-sit-bed-edge" onclick="sitAtBedEdge()" style="width:100%;">🛏️ 坐床邊 (可沿床邊順暢移動)</button>
+          <button id="btn-sit-on-chair" onclick="sitOnSelectedChair()" style="width:100%;">🪑 坐椅子上 (背靠椅背向外看)</button>
         </div>
         <div class="field-group" style="margin:0;">
           <label style="color:#BAE6FD;">選擇要坐哪一張椅子：</label>
@@ -304,14 +312,18 @@
       </button>
       <div class="field-row" style="margin-top:4px;">
         <button onclick="sitAtBedEdge(); enterHumanFPV();" style="width:100%; padding:7px;">🪑 坐床邊看房間</button>
+        <button onclick="sitOnSelectedChair(); enterHumanFPV();" style="width:100%; padding:7px; background:#0284C7; border-color:#0284C7;">🪑 坐椅子上看房間</button>
         <button onclick="placeHumanOnBed('lie')" style="width:100%; padding:7px;">🛏️ 躺床上仰視房間</button>
       </div>
     </div>
 
     <!-- 標籤 4：專案存檔 -->
     <div class="tab-content" id="tab-content-save" style="display: none;">
-      <div class="panel-title">💾 1. 存於 App 內 (本地保存)</div>
-      <button id="btn-save-local" class="primary" style="width: 100%; padding:8px;">💾 儲存目前設計至 App</button>
+      <div class="panel-title">💾 1. 存於 App 內 (本地記憶自動載入)</div>
+      <div id="save-status-banner" style="font-size:11px; color:#34D399; background:rgba(5, 150, 105, 0.18); border:1px solid #059669; padding:6px 8px; border-radius:6px; line-height:1.4;">
+        ✅ 系統已啟用自動記憶與存檔保護，重開 App 會自動載入您最後儲存的設計。
+      </div>
+      <button id="btn-save-local" class="primary" style="width: 100%; padding:8px; font-weight:bold;">💾 儲存目前設計至 App</button>
       <button id="btn-load-local" style="width: 100%; padding:8px;">📂 讀取上次儲存的設計</button>
 
       <div class="panel-title" style="margin-top: 12px;">📁 2. 下載檔案與上傳繼續使用</div>
@@ -341,18 +353,20 @@
         <button id="btn-mode-fpv" class="purple">👁️ 第一人稱視角</button>
       </div>
       <div class="hint-text" style="font-size: 11px; color: #94A3B8;">
-        💡 坐下時腳著地不穿模 | 可選坐床邊(沿床邊移動)或下拉選椅子坐
+        💡 支援 Ctrl+C 複製 / Ctrl+V 貼上 | 坐下可選坐床邊(順暢滑動)或坐椅子(背靠椅背視角)
       </div>
     </div>
 
     <div class="toast-msg" id="toast-msg">⚠️ 提示訊息</div>
 
     <div class="view-controls" id="view-controls-2d">
-      <button id="btn-zoom-in">➕</button>
-      <button id="btn-zoom-out">➖</button>
-      <button id="btn-zoom-fit">🔍 居中</button>
+      <button id="btn-zoom-in" title="放大">➕</button>
+      <button id="btn-zoom-out" title="縮小">➖</button>
+      <button id="btn-zoom-fit" title="置中縮放">🔍 居中</button>
       <button id="btn-pan-toggle">✋ 平移: 關</button>
       <button id="btn-lock-scale-2d" onclick="toggleLockScaleBtn()">🔓 縮放: 開</button>
+      <button onclick="copySelectedItem()" title="複製選取物件 (Ctrl+C)">📄 複製</button>
+      <button onclick="pasteCopiedItem()" title="貼上物件 (Ctrl+V)">📋 貼上</button>
       <button onclick="deleteSelectedActive()" class="danger">🗑️ 刪除</button>
     </div>
 
@@ -361,6 +375,8 @@
       <button id="btn-3d-rotate" onclick="set3DGizmoMode('rotate')">🔄 旋轉</button>
       <button id="btn-3d-scale" onclick="set3DGizmoMode('scale')">↔️ 縮放物品</button>
       <button id="btn-lock-scale-3d" onclick="toggleLockScaleBtn()">🔓 縮放: 開</button>
+      <button onclick="copySelectedItem()" title="複製選取物件 (Ctrl+C)">📄 複製</button>
+      <button onclick="pasteCopiedItem()" title="貼上物件 (Ctrl+V)">📋 貼上</button>
       <button onclick="deleteSelectedActive()" class="danger">🗑️ 刪除</button>
     </div>
 
@@ -436,8 +452,12 @@
       <button onclick="toggleMobilePanel('canvas')" class="danger" style="padding:2px 6px;">✕</button>
     </div>
     <div class="panel-title">
-      <span>📋 分類列表 (點分類展開)</span>
-      <span id="obj-count" style="font-size: 11px; color: #94A3B8;">0</span>
+      <span>📋 分類列表</span>
+      <div style="display:flex; align-items:center; gap:4px;">
+        <button onclick="copySelectedItem()" title="複製選取物件 (Ctrl+C)" style="padding:2px 5px; font-size:10px; background:#1E293B; border-color:#3B82F6;">📄複製</button>
+        <button onclick="pasteCopiedItem()" title="貼上物件 (Ctrl+V)" style="padding:2px 5px; font-size:10px; background:#059669; border-color:#059669;">📋貼上</button>
+        <span id="obj-count" style="font-size: 11px; color: #94A3B8;">0</span>
+      </div>
     </div>
     <div class="item-list" id="item-list-container"></div>
   </div>
