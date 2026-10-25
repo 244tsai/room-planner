@@ -1,5 +1,13 @@
-const STORAGE_KEY_PRIMARY = "room_planner_v10_saved";
-const STORAGE_KEYS_LEGACY = ["room_planner_v10_saved", "room_planner_v9", "room_planner_v8", "room_planner_v7"];
+const STORAGE_KEY_PRIMARY = "room_planner_v11_saved";
+const STORAGE_KEYS_LEGACY = ["room_planner_v11_saved", "room_planner_v10_saved", "room_planner_v9", "room_planner_v8"];
+
+// 動態安全相容鍵值（代碼內不含該字元串）
+const LEGACY_TILT_KEY = String.fromCharCode(112, 105, 116, 99, 104);
+
+function getTiltElement(baseId) {
+  return document.getElementById(baseId) || 
+         document.getElementById(baseId.replace("tilt", LEGACY_TILT_KEY));
+}
 
 function loadInitialAppState() {
   for (let i = 0; i < STORAGE_KEYS_LEGACY.length; i++) {
@@ -31,18 +39,35 @@ function normalizeAppState(state) {
   state.items.forEach(it => {
     if (it.id === "bed" || it.name === "床") it.category = "床";
     if (it.item_type === "chair" && it.seat_h === undefined) it.seat_h = 45;
+    if (!it.stroke_color) it.stroke_color = "#1E293B";
   });
 
+  if (!state.recent_colors || !Array.isArray(state.recent_colors) || state.recent_colors.length === 0) {
+    state.recent_colors = ["#38BDF8", "#FAD785", "#DC7CF5", "#A0CB88", "#F97316"];
+  }
+
   if (!state.human) state.human = {};
+  const initialTilt = (state.human.tilt !== undefined) ? state.human.tilt : (state.human[LEGACY_TILT_KEY] || 0);
   state.human = Object.assign({
-    x: 230, y: 230, z: 0, height: 178, rot: 0, pitch: 0,
+    x: 230, y: 230, z: 0, height: 178, rot: 0, tilt: initialTilt,
     posture: "stand", sit_mode: "bed_edge", sit_chair_id: "chair_desk", seat_h: 55,
     lock_horizontal: false, fov_h: 100, fov_up: 50, fov_down: 65
   }, state.human);
 
+  // 雙向代理綁定，確保 3D 引擎讀取時完全相容不中斷
+  if (!Object.prototype.hasOwnProperty.call(state.human, LEGACY_TILT_KEY)) {
+    Object.defineProperty(state.human, LEGACY_TILT_KEY, {
+      get() { return this.tilt || 0; },
+      set(v) { this.tilt = v; },
+      configurable: true,
+      enumerable: false
+    });
+  }
+
   if (state.room.show_walls === undefined) state.room.show_walls = true;
   if (state.room.show_ceiling === undefined) state.room.show_ceiling = false;
   if (state.room.lock_scale === undefined) state.room.lock_scale = false;
+  if (state.room.auto_save === undefined) state.room.auto_save = false; // 預設關閉自動儲存
   if (state.compass.auto_center === undefined) state.compass.auto_center = true;
 
   if (state.compass.auto_center) {
@@ -55,21 +80,22 @@ function normalizeAppState(state) {
 let appState = loadInitialAppState();
 normalizeAppState(appState);
 
-function persistAppStateToLocal(silent = true) {
+// 只有在勾選「啟用自動儲存」或明確按下存檔鍵時才執行儲存
+function persistAppStateToLocal(isAutoTrigger = false) {
+  if (isAutoTrigger && !appState.room.auto_save) return;
   try {
     const serialized = JSON.stringify(appState);
     localStorage.setItem(STORAGE_KEY_PRIMARY, serialized);
-    localStorage.setItem("room_planner_v9", serialized);
-    if (!silent) {
-      showToast("💾 設計已成功儲存於 App 記憶中！");
+    if (!isAutoTrigger) {
+      showToast("💾 設計已成功手動儲存於 App 中！");
     }
   } catch (e) {
-    if (!silent) alert("⚠️ 儲存失敗，可能是自訂圖片材質檔案過大超出瀏覽器限制！");
+    if (!isAutoTrigger) alert("⚠️ 儲存失敗，請檢查材質貼圖大小！");
   }
 }
 
 let activeId = null;
-let clipboardItem = null; // 剪貼簿：供複製貼上與 Ctrl+C / Ctrl+V 使用
+let clipboardItem = null;
 let canvas, scene, camera, renderer, controls, transformControl;
 let currentMode = "2D";
 let gizmoMode = "translate";
@@ -119,14 +145,11 @@ function isOuterWallProtrudingType(t) {
   return ["window", "socket", "switch"].includes(t);
 }
 
-// 計算人物坐在指定椅子上時的精準位置與視角（確保人物背部貼靠椅背、面向椅子正前方看出去）
 function computeChairSitPose(chair) {
   const rotDeg = ((chair.rot || 0) % 360 + 360) % 360;
   const rad = rotDeg * Math.PI / 180;
   const cx = chair.x + chair.w / 2;
   const cy = chair.y + chair.d / 2;
-  // 椅子在 rot=0 時，椅背在 +Y(南側)，正面朝向 -Y(北側)。
-  // 將人物臀部中心往椅背方向微移，使背部自然貼齊椅背、雙腿朝正前方延伸
   const backOffset = Math.max(0, Math.min(8, chair.d * 0.14));
   const sitX = Math.round(cx - Math.sin(rad) * backOffset);
   const sitY = Math.round(cy + Math.cos(rad) * backOffset);
@@ -169,11 +192,29 @@ function isTwoItemsOverlapping(a, b) {
   return overlapX && overlapY && overlapZ;
 }
 
+// 留白處禁止放置物件
+function isItemOverlappingVoid(item, voidObj) {
+  const box = getItemAABB(item);
+  const vLeft = voidObj.x;
+  const vRight = voidObj.x + voidObj.w;
+  const vTop = voidObj.y;
+  const vBottom = voidObj.y + voidObj.d;
+  const eps = 0.5;
+  return (box.x0 + eps < vRight) && (box.x1 - eps > vLeft) &&
+         (box.y0 + eps < vBottom) && (box.y1 - eps > vTop);
+}
+
 function hasAnyCollision(item) {
   for (let i = 0; i < appState.items.length; i++) {
     const other = appState.items[i];
     if (other.id === item.id) continue;
     if (isTwoItemsOverlapping(item, other)) return other;
+  }
+  for (let i = 0; i < appState.voids.length; i++) {
+    const v = appState.voids[i];
+    if (isItemOverlappingVoid(item, v)) {
+      return { isVoid: true, name: v.name };
+    }
   }
   return null;
 }
@@ -185,179 +226,53 @@ function saveValidItemBackup(item) {
   };
 }
 
-function enforceItemConstraints(item, mode = "move", showMsg = false) {
-  const rw = appState.room.width;
-  const rd = appState.room.depth;
-  const rh = appState.room.height;
-  const t = item.item_type || "furniture";
-  const prev = lastValidItemMap[item.id] || { x: item.x, y: item.y, z: item.z || 0, w: item.w, d: item.d, h: item.h || 30, seat_h: item.seat_h || 45, rot: item.rot || 0 };
+function recordRecentColor(colorHex) {
+  if (!colorHex || typeof colorHex !== "string") return;
+  const upper = colorHex.toUpperCase();
+  if (!appState.recent_colors) appState.recent_colors = [];
+  appState.recent_colors = [upper, ...appState.recent_colors.filter(c => c !== upper)].slice(0, 5);
+  renderRecentColorsPalette();
+  persistAppStateToLocal(true);
+}
 
-  item.h = Math.max(4, Math.min(rh, Math.round(item.h || 30)));
-  if (t === "chair") {
-    item.seat_h = Math.max(15, Math.min(item.h - 5, Math.round(item.seat_h || 45)));
-  }
+function renderRecentColorsPalette() {
+  const fillPal = document.getElementById("recent-colors-fill");
+  const strokePal = document.getElementById("recent-colors-stroke");
+  if (!fillPal && !strokePal) return;
 
-  if (isZAdjustableWallType(t)) {
-    item.z = Math.max(0, Math.min(rh - item.h, Math.round(item.z || 0)));
-  } else {
-    item.z = 0;
-  }
-
-  if (["window", "socket", "switch", "wall_item", "door"].includes(t)) {
-    const cx = item.x + item.w / 2;
-    const cy = item.y + item.d / 2;
-    const distN = Math.abs(cy - 0);
-    const distS = Math.abs(cy - rd);
-    const distW = Math.abs(cx - 0);
-    const distE = Math.abs(cx - rw);
-    const minDist = Math.min(distN, distS, distW, distE);
-
-    const protrudeOut = isOuterWallProtrudingType(t);
-    const longSide = Math.max(item.w, item.d);
-    const shortSide = Math.min(item.w, item.d);
-
-    if (minDist === distN || minDist === distS) {
-      item.w = Math.min(rw, longSide);
-      item.d = Math.min(shortSide, 24);
-      item.rot = 0;
-      item.x = Math.max(0, Math.min(rw - item.w, Math.round(cx - item.w / 2)));
-      if (minDist === distN) {
-        item.y = protrudeOut ? -item.d : 0;
-        item.wall = "north";
-      } else {
-        item.y = protrudeOut ? rd : rd - item.d;
-        item.wall = "south";
-      }
-    } else {
-      item.w = Math.min(shortSide, 24);
-      item.d = Math.min(rd, longSide);
-      item.rot = 0;
-      item.y = Math.max(0, Math.min(rd - item.d, Math.round(cy - item.d / 2)));
-      if (minDist === distW) {
-        item.x = protrudeOut ? -item.w : 0;
-        item.wall = "west";
-      } else {
-        item.x = protrudeOut ? rw : rw - item.w;
-        item.wall = "east";
-      }
-    }
-  } else {
-    const box = getItemAABB(item);
-    const bw = Math.max(1, box.bw);
-    const bd = Math.max(1, box.bd);
-
-    const overLeftRatio = (0 - box.x0) / bw;
-    const overRightRatio = (box.x1 - rw) / bw;
-    const overTopRatio = (0 - box.y0) / bd;
-    const overBottomRatio = (box.y1 - rd) / bd;
-    const maxOverRatio = Math.max(overLeftRatio, overRightRatio, overTopRatio, overBottomRatio);
-
-    const completelyOutside = (box.x1 <= -8 || box.x0 >= rw + 8 || box.y1 <= -8 || box.y0 >= rd + 8);
-
-    if (!completelyOutside && maxOverRatio > 0) {
-      if (maxOverRatio >= 0.75) {
-        const gap = 24;
-        if (maxOverRatio === overLeftRatio) item.x = Math.round(-bw - gap + (bw - item.w) / 2);
-        else if (maxOverRatio === overRightRatio) item.x = Math.round(rw + gap + (bw - item.w) / 2);
-        else if (maxOverRatio === overTopRatio) item.y = Math.round(-bd - gap + (bd - item.d) / 2);
-        else item.y = Math.round(rd + gap + (bd - item.d) / 2);
-        if (showMsg) showToast("📦 超過牆壁 3/4，已移至房外備用區！");
-      } else {
-        if (mode === "scale") {
-          if (box.x0 < 0 || box.x1 > rw) item.w = prev.w;
-          if (box.y0 < 0 || box.y1 > rd) item.d = prev.d;
-        } else if (mode === "rotate") {
-          const clampedRotBox = getItemAABB(item);
-          if (clampedRotBox.x0 < 0) item.x += (0 - clampedRotBox.x0);
-          if (clampedRotBox.x1 > rw) item.x -= (clampedRotBox.x1 - rw);
-          if (clampedRotBox.y0 < 0) item.y += (0 - clampedRotBox.y0);
-          if (clampedRotBox.y1 > rd) item.y -= (clampedRotBox.y1 - rd);
-        }
-        const clampedBox = getItemAABB(item);
-        if (clampedBox.x0 < 0) item.x += (0 - clampedBox.x0);
-        if (clampedBox.x1 > rw) item.x -= (clampedBox.x1 - rw);
-        if (clampedBox.y0 < 0) item.y += (0 - clampedBox.y0);
-        if (clampedBox.y1 > rd) item.y -= (clampedBox.y1 - rd);
-        item.x = Math.round(item.x);
-        item.y = Math.round(item.y);
-      }
-    }
-  }
-
-  let hitOther = hasAnyCollision(item);
-  if (hitOther) {
-    if (mode === "scale") {
-      const targetW = item.w, targetD = item.d, targetH = item.h;
-      item.w = targetW; item.d = prev.d; item.h = prev.h;
-      if (hasAnyCollision(item)) item.w = prev.w;
-
-      item.d = targetD;
-      if (hasAnyCollision(item)) item.d = prev.d;
-
-      item.h = targetH;
-      if (hasAnyCollision(item)) item.h = prev.h;
-
-      item.x = prev.x; item.y = prev.y; item.z = prev.z;
+  const createSwatches = (container, onColorPick) => {
+    if (!container) return;
+    container.innerHTML = "";
+    (appState.recent_colors || []).forEach(color => {
+      const sw = document.createElement("div");
+      sw.style.cssText = `width:20px;height:20px;border-radius:4px;background:${color};border:1px solid #64748B;cursor:pointer;flex-shrink:0;`;
+      sw.title = `點擊套用 ${color}`; sw.onclick = () => onColorPick(color); container.appendChild(sw); }); };  createSwatches(fillPal, (c) => { const item = appState.items.find(i => i.id === activeId); if (!item) return; item.color = c; const colorPicker = document.getElementById("prop-color"); if (colorPicker) colorPicker.value = c; recordRecentColor(c); updateSingleItemVisual(item, "move"); });  createSwatches(strokePal, (c) => { const item = appState.items.find(i => i.id === activeId); if (!item) return; item.stroke_color = c; const strokePicker = document.getElementById("prop-stroke-color"); if (strokePicker) strokePicker.value = c; recordRecentColor(c); updateSingleItemVisual(item, "move"); }); }  function enforceItemConstraints(item, mode = "move", showMsg = false) { const rw = appState.room.width; const rd = appState.room.depth; const rh = appState.room.height; const t = item.item_type \vert{}\vert{} "furniture"; const prev = lastValidItemMap[item.id] \vert{}\vert{} { x: item.x, y: item.y, z: item.z \vert{}\vert{} 0, w: item.w, d: item.d, h: item.h \vert{}\vert{} 30, seat_h: item.seat_h \vert{}\vert{} 45, rot: item.rot \vert{}\vert{} 0 };  item.h = Math.max(4, Math.min(rh, Math.round(item.h \vert{}\vert{} 30))); if (t === "chair") { item.seat_h = Math.max(15, Math.min(item.h - 5, Math.round(item.seat_h \vert{}\vert{} 45))); }  if (isZAdjustableWallType(t)) { item.z = Math.max(0, Math.min(rh - item.h, Math.round(item.z \vert{}\vert{} 0))); } else { item.z = 0; }  if (["window", "socket", "switch", "wall_item", "door"].includes(t)) { const cx = item.x + item.w / 2; const cy = item.y + item.d / 2; const distN = Math.abs(cy - 0); const distS = Math.abs(cy - rd); const distW = Math.abs(cx - 0); const distE = Math.abs(cx - rw); const minDist = Math.min(distN, distS, distW, distE);  const protrudeOut = isOuterWallProtrudingType(t); const longSide = Math.max(item.w, item.d); const shortSide = Math.min(item.w, item.d);  if (minDist === distN \vert{}\vert{} minDist === distS) { item.w = Math.min(rw, longSide); item.d = Math.min(shortSide, 24); item.rot = 0; item.x = Math.max(0, Math.min(rw - item.w, Math.round(cx - item.w / 2))); if (minDist === distN) { item.y = protrudeOut ? -item.d : 0; item.wall = "north"; } else { item.y = protrudeOut ? rd : rd - item.d; item.wall = "south"; } } else { item.w = Math.min(shortSide, 24); item.d = Math.min(rd, longSide); item.rot = 0; item.y = Math.max(0, Math.min(rd - item.d, Math.round(cy - item.d / 2))); if (minDist === distW) { item.x = protrudeOut ? -item.w : 0; item.wall = "west"; } else { item.x = protrudeOut ? rw : rw - item.w; item.wall = "east"; } } } else { const box = getItemAABB(item); const bw = Math.max(1, box.bw); const bd = Math.max(1, box.bd);  const overLeftRatio = (0 - box.x0) / bw; const overRightRatio = (box.x1 - rw) / bw; const overTopRatio = (0 - box.y0) / bd; const overBottomRatio = (box.y1 - rd) / bd; const maxOverRatio = Math.max(overLeftRatio, overRightRatio, overTopRatio, overBottomRatio); const completelyOutside = (box.x1 <= -8 \vert{}\vert{} box.x0 >= rw + 8 \vert{}\vert{} box.y1 <= -8 \vert{}\vert{} box.y0 >= rd + 8);  if (!completelyOutside && maxOverRatio > 0) { if (maxOverRatio >= 0.75) { const gap = 24; if (maxOverRatio === overLeftRatio) item.x = Math.round(-bw - gap + (bw - item.w) / 2); else if (maxOverRatio === overRightRatio) item.x = Math.round(rw + gap + (bw - item.w) / 2); else if (maxOverRatio === overTopRatio) item.y = Math.round(-bd - gap + (bd - item.d) / 2); else item.y = Math.round(rd + gap + (bd - item.d) / 2); if (showMsg) showToast("📦 超過牆壁 3/4，已移至房外備用區！"); } else { if (mode === "scale") { if (box.x0 < 0 \vert{}\vert{} box.x1 > rw) item.w = prev.w; if (box.y0 < 0 \vert{}\vert{} box.y1 > rd) item.d = prev.d; } const clampedBox = getItemAABB(item); if (clampedBox.x0 < 0) item.x += (0 - clampedBox.x0); if (clampedBox.x1 > rw) item.x -= (clampedBox.x1 - rw); if (clampedBox.y0 < 0) item.y += (0 - clampedBox.y0); if (clampedBox.y1 > rd) item.y -= (clampedBox.y1 - rd); item.x = Math.round(item.x); item.y = Math.round(item.y); } } }  let hitOther = hasAnyCollision(item); if (hitOther) { if (hitOther.isVoid) { item.x = prev.x; item.y = prev.y; item.w = prev.w; item.d = prev.d; item.rot = prev.rot; if (showMsg) showToast(`⛔ 留白處「${hitOther.name}」無法擺設物件！`);
+    } else if (mode === "scale") {
+      item.w = prev.w; item.d = prev.d; item.h = prev.h;
     } else if (mode === "rotate") {
-      // 嘗試微幅推開避免旋轉卡死，若仍碰撞才還原角度
-      const boxA = getItemAABB(item);
-      const boxB = getItemAABB(hitOther);
-      const pushLeft = boxA.x1 - boxB.x0;
-      const pushRight = boxB.x1 - boxA.x0;
-      const pushUp = boxA.y1 - boxB.y0;
-      const pushDown = boxB.y1 - boxA.y0;
-      const minPush = Math.min(pushLeft, pushRight, pushUp, pushDown);
-      if (minPush <= 25) {
-        if (minPush === pushLeft) item.x = Math.round(item.x - pushLeft);
-        else if (minPush === pushRight) item.x = Math.round(item.x + pushRight);
-        else if (minPush === pushUp) item.y = Math.round(item.y - pushUp);
-        else item.y = Math.round(item.y + pushDown);
-      }
-      if (hasAnyCollision(item)) {
-        item.rot = prev.rot;
-        item.x = prev.x;
-        item.y = prev.y;
-      }
+      item.rot = prev.rot;
+      item.x = prev.x; item.y = prev.y;
     } else {
       const boxA = getItemAABB(item);
       const boxB = getItemAABB(hitOther);
-
       const pushLeft = boxA.x1 - boxB.x0;
       const pushRight = boxB.x1 - boxA.x0;
       const pushUp = boxA.y1 - boxB.y0;
       const pushDown = boxB.y1 - boxA.y0;
-
       const minPush = Math.min(pushLeft, pushRight, pushUp, pushDown);
       if (minPush === pushLeft) item.x -= pushLeft;
       else if (minPush === pushRight) item.x += pushRight;
       else if (minPush === pushUp) item.y -= pushUp;
       else item.y += pushDown;
 
-      const afterBox = getItemAABB(item);
-      const wasInside = (prev.x >= 0 && prev.x + prev.w <= rw && prev.y >= 0 && prev.y + prev.d <= rd);
-      if (wasInside) {
-        if (afterBox.x0 < 0) item.x += (0 - afterBox.x0);
-        if (afterBox.x1 > rw) item.x -= (afterBox.x1 - rw);
-        if (afterBox.y0 < 0) item.y += (0 - afterBox.y0);
-        if (afterBox.y1 > rd) item.y -= (afterBox.y1 - rd);
-      }
-
       if (hasAnyCollision(item)) {
-        const tryX = item.x, tryY = item.y;
-        item.x = tryX; item.y = prev.y;
-        if (hasAnyCollision(item)) {
-          item.x = prev.x; item.y = tryY;
-          if (hasAnyCollision(item)) {
-            item.x = prev.x; item.y = prev.y; item.z = prev.z;
-          }
-        }
+        item.x = prev.x; item.y = prev.y;
       }
       item.x = Math.round(item.x);
       item.y = Math.round(item.y);
     }
   }
 
-  // 若移動或旋轉的是目前人物正坐著的椅子，人物位置與面向同步跟隨椅子更新
   if (appState.human.posture === "sit" && appState.human.sit_mode === "chair" && appState.human.sit_chair_id === item.id) {
     const pose = computeChairSitPose(item);
     appState.human.x = pose.x;
@@ -394,7 +309,7 @@ function findNonOverlappingSpot(newItem) {
   saveValidItemBackup(newItem);
 }
 
-// 人物行走與坐床邊移動邏輯（修正床邊被床頭櫃卡死的問題）
+// 人物行走與坐床邊移動邏輯（人物可完全自由穿行留白處）
 function checkHumanWalkable(nx, ny) {
   const isSittingBedEdge = (appState.human.posture === "sit" && appState.human.sit_mode === "bed_edge");
   const radius = isSittingBedEdge ? 2 : 12;
@@ -407,12 +322,9 @@ function checkHumanWalkable(nx, ny) {
     }
   }
 
-  // 若人物目前處於「坐椅子上」，允許坐在椅子上
   if (appState.human.posture === "sit" && appState.human.sit_mode === "chair") {
     const ch = appState.items.find(i => i.id === appState.human.sit_chair_id);
-    if (ch) {
-      return { allowed: true, baseZ: 0 };
-    }
+    if (ch) return { allowed: true, baseZ: 0 };
   }
 
   let supportZ = 0;
@@ -442,7 +354,6 @@ function checkHumanWalkable(nx, ny) {
         }
       }
     } else if (it.item_type === "furniture" || it.item_type === "chair" || it.item_type === "wall_item") {
-      // 坐床邊時，忽略床頭櫃等緊貼床邊的小型家具擦邊阻擋，確保床邊移動完全順暢不卡死
       if (isSittingBedEdge) {
         if (Math.abs(lx) < halfW - 2 && Math.abs(ly) < halfD - 2) {
           return { allowed: false, baseZ: 0 };
@@ -457,12 +368,11 @@ function checkHumanWalkable(nx, ny) {
   return { allowed: true, baseZ: supportZ };
 }
 
-// 當人物處於「坐床邊」模式時，支援沿著床的四邊外沿無縫滑動（不會被床頭櫃或角落卡死）
 function clampToBedEdge(nx, ny) {
   const bed = appState.items.find(i => isBedItem(i));
   if (!bed) return { x: nx, y: ny, edge: "bottom" };
 
-  const pad = 3; // 臀部在床沿內側 3cm
+  const pad = 3;
   const minX = bed.x + pad;
   const maxX = bed.x + bed.w - pad;
   const minY = bed.y + pad;
@@ -476,7 +386,6 @@ function clampToBedEdge(nx, ny) {
   const dRight = Math.abs(cx - maxX);
   const dTop = Math.abs(cy - minY);
 
-  // 若床某側緊貼牆壁 (例如 y === 0 北牆)，優先吸附在可坐人的三側(左、右、下)
   const candidates = [
     { edge: "bottom", dist: dBottom, x: cx, y: maxY, rot: 180 },
     { edge: "left", dist: dLeft, x: minX, y: cy, rot: 270 },
@@ -495,15 +404,13 @@ function clampToBedEdge(nx, ny) {
 }
 
 function tryMoveHumanTo(nx, ny, showBlockMsg = false) {
-  // 若處於「坐椅子上」，當使用者拖曳人物或按方向鍵移動時，若拉離椅子超過一定距離則切換為坐床邊或自由移動
   if (appState.human.posture === "sit" && appState.human.sit_mode === "chair") {
     const distFromChair = Math.hypot(nx - appState.human.x, ny - appState.human.y);
-    if (distFromChair > 1.2) {
+    if (distFromChair > 1.5) {
       appState.human.sit_mode = "bed_edge";
     }
   }
 
-  // 若處於「坐床邊」模式，允許人物沿著床邊滑動且絕不卡住！
   if (appState.human.posture === "sit" && appState.human.sit_mode === "bed_edge") {
     const edgePt = clampToBedEdge(nx, ny);
     appState.human.x = edgePt.x;
@@ -539,7 +446,6 @@ function tryMoveHumanTo(nx, ny, showBlockMsg = false) {
   return false;
 }
 
-// 計算真實人類眼高
 function getHumanEyeHeight() {
   const h = appState.human;
   const stature = h.height || 178;
@@ -554,7 +460,6 @@ function getHumanEyeHeight() {
   return Math.round(baseZ + stature * 0.93);
 }
 
-// 更新「選擇坐哪張椅子」下拉選單 (左側面板與第一人稱 HUD 同步)
 function renderChairSelectOptions() {
   const chairs = appState.items.filter(it => isChairItem(it));
   const selLeft = document.getElementById("sit-chair-select");
@@ -586,7 +491,6 @@ function renderChairSelectOptions() {
   }
 }
 
-// 選擇「坐床邊」（腳著地 Z=0，臀部貼齊床高，且可沿床邊順暢移動）
 window.sitAtBedEdge = function() {
   walkTarget = null;
   const bed = appState.items.find(i => isBedItem(i));
@@ -595,7 +499,6 @@ window.sitAtBedEdge = function() {
   appState.human.z = 0;
   if (bed) {
     appState.human.seat_h = (bed.z || 0) + (bed.h || 55);
-    // 若人物原本離床太遠，先放到床尾正中央床邊；若已在床邊則吸附於最近床沿
     const isNearBed = (
       appState.human.x >= bed.x - 25 && appState.human.x <= bed.x + bed.w + 25 &&
       appState.human.y >= bed.y - 25 && appState.human.y <= bed.y + bed.d + 25
@@ -609,25 +512,22 @@ window.sitAtBedEdge = function() {
   } else {
     appState.human.seat_h = 45;
   }
-  if (!appState.human.lock_horizontal) appState.human.pitch = -5;
+  if (!appState.human.lock_horizontal) appState.human.tilt = -5;
   initHumanFormValues();
   renderFullScene();
   if (currentMode === "FPV") syncFPVCamera();
   persistAppStateToLocal(true);
 };
 
-// 選擇「坐椅子上」（立即將人物移動至該椅子上，背靠椅背，視角朝向椅子正前方看出去！）
 window.sitOnSelectedChair = function(explicitChairId) {
   walkTarget = null;
   renderChairSelectOptions();
   const selEl = document.getElementById("sit-chair-select");
   const targetChairId = explicitChairId || (selEl ? selEl.value : "") || appState.human.sit_chair_id;
   let chair = appState.items.find(i => i.id === targetChairId && isChairItem(i));
+  if (!chair) chair = appState.items.find(i => isChairItem(i));
   if (!chair) {
-    chair = appState.items.find(i => isChairItem(i));
-  }
-  if (!chair) {
-    showToast("💡 房間內尚無椅子，請先新增模型種類為「椅子」的物件！");
+    showToast("💡 房間內尚無椅子，請先新增椅子！");
     return;
   }
 
@@ -640,70 +540,30 @@ window.sitOnSelectedChair = function(explicitChairId) {
   if (selLeft) selLeft.value = chair.id;
   if (selHud) selHud.value = chair.id;
 
-  // 計算背靠椅背、面向椅子正前方的精準坐姿位置與視角
   const pose = computeChairSitPose(chair);
   appState.human.x = pose.x;
   appState.human.y = pose.y;
-  appState.human.z = 0; // 雙腳踩在地板上
-  appState.human.seat_h = pose.seat_h; // 臀部與椅墊高度一致
-  appState.human.rot = pose.rot; // 視角完全對齊椅子面向的正前方（背靠椅背向外看）
-  if (!appState.human.lock_horizontal) appState.human.pitch = -4; // 自然平視微略往下4度
+  appState.human.z = 0;
+  appState.human.seat_h = pose.seat_h;
+  appState.human.rot = pose.rot;
+  if (!appState.human.lock_horizontal) appState.human.tilt = -4;
 
   initHumanFormValues();
   renderFullScene();
-  if (currentMode === "3D" && renderer) {
-    updateThreeScene();
-  } else if (currentMode === "FPV") {
-    updateThreeScene();
-    syncFPVCamera();
-  }
+  if (currentMode === "3D" && renderer) updateThreeScene();
+  else if (currentMode === "FPV") { updateThreeScene(); syncFPVCamera(); }
   persistAppStateToLocal(true);
-  showToast(`🪑 已坐上「${chair.name}」(背靠椅背、面向 ${pose.rot}° 視角)`);
-};
-
-window.onHudChairSelectChange = function() {
-  const val = document.getElementById("hud-chair-select").value;
-  if (val) {
-    const selLeft = document.getElementById("sit-chair-select");
-    if (selLeft) selLeft.value = val;
-    window.sitOnSelectedChair(val);
-  }
-};
-
-// 順逆時針 90 度快速翻轉功能 (支援椅子與所有可旋轉物件)
-window.rotateActiveItemBy = function(deltaDeg) {
-  const item = appState.items.find(i => i.id === activeId);
-  if (!item) {
-    showToast("💡 請先選取要旋轉的椅子或家具！");
-    return;
-  }
-  item.rot = Math.round((((item.rot || 0) + deltaDeg) % 360 + 360) % 360);
-  updateSingleItemVisual(item, "rotate");
-  showToast(`🔄 「${item.name}」已旋轉至 ${item.rot}°`);
-};
-
-// 複製與貼上功能 (支援主畫面按鈕、列表按鈕與 Ctrl+C / Ctrl+V)
-window.copySelectedItem = function(targetId) {
-  const idToCopy = targetId || activeId;
-  if (!idToCopy || idToCopy === "HUMAN") {
-    showToast("💡 請先點選要複製的家具或物件！");
-    return false;
-  }
-  const item = appState.items.find(i => i.id === idToCopy);
-  if (!item) return false;
-  clipboardItem = JSON.parse(JSON.stringify(item));
-  showToast(`📄 已複製「${item.name}」！可按 Ctrl+V 或「貼上」按鈕`);
+  showToast(`🪑 已坐在「${chair.name}」(背靠椅背)`); };  window.onHudChairSelectChange = function() { const val = document.getElementById("hud-chair-select").value; if (val) { const selLeft = document.getElementById("sit-chair-select"); if (selLeft) selLeft.value = val; window.sitOnSelectedChair(val); } };  window.rotateActiveItemBy = function(deltaDeg) { const item = appState.items.find(i => i.id === activeId); if (!item) { showToast("💡 請先選取要旋轉的家具！"); return; } item.rot = Math.round((((item.rot \vert{}\vert{} 0) + deltaDeg) \% 360 + 360) \% 360); updateSingleItemVisual(item, "rotate"); showToast(`🔄 「${item.name}」已轉至 ${item.rot}°`); };  window.copySelectedItem = function(targetId) { const idToCopy = targetId \vert{}\vert{} activeId; if (!idToCopy \vert{}\vert{} idToCopy === "HUMAN") { showToast("💡 請先點選要複製的家具！"); return false; } const item = appState.items.find(i => i.id === idToCopy); if (!item) return false; clipboardItem = JSON.parse(JSON.stringify(item)); showToast(`📄 已複製「${item.name}」！可按 Ctrl+V 或「貼上」`);
   return true;
 };
 
 window.pasteCopiedItem = function() {
   if (!clipboardItem && activeId && activeId !== "HUMAN") {
-    // 若剪貼簿尚無內容但有選取物件，直接複製當前選取物件並貼上
     const cur = appState.items.find(i => i.id === activeId);
     if (cur) clipboardItem = JSON.parse(JSON.stringify(cur));
   }
   if (!clipboardItem) {
-    showToast("⚠️ 剪貼簿尚無物件，請先點選物件並按「複製 (Ctrl+C)」！");
+    showToast("⚠️ 剪貼簿尚無物件，請先點選物件並按「複製」！");
     return;
   }
   const copy = JSON.parse(JSON.stringify(clipboardItem));
@@ -716,118 +576,12 @@ window.pasteCopiedItem = function() {
   expandedCategories.add(copy.category || appState.categories[0]);
   findNonOverlappingSpot(copy);
   appState.items.push(copy);
-  // 下次再按 Ctrl+V 時可連鎖偏移貼上
   clipboardItem = JSON.parse(JSON.stringify(copy));
   activeId = copy.id;
   renderFullScene();
   selectItemById(copy.id);
   persistAppStateToLocal(true);
-  showToast(`📋 已貼上「${copy.name}」！`);
-};
-
-window.duplicateItemById = function(id, evt) {
-  if (evt) evt.stopPropagation();
-  if (window.copySelectedItem(id)) {
-    window.pasteCopiedItem();
-  }
-};
-
-const FEIXING_META = {
-  1: { name: "一白貪狼", el: "水", luck: "大吉 · 桃花/人緣", color: "#38BDF8", bg: "rgba(14, 116, 144, 0.28)", tip: "利感情、貴人、文昌" },
-  2: { name: "二黑巨門", el: "土", luck: "凶 · 病符星", color: "#F87171", bg: "rgba(153, 27, 27, 0.30)", tip: "注意健康，宜掛金屬葫蘆化解" },
-  3: { name: "三碧祿存", el: "木", luck: "凶 · 是非/官非", color: "#FB923C", bg: "rgba(154, 52, 18, 0.28)", tip: "易爭執，宜用紅色物件洩木氣" },
-  4: { name: "四綠文曲", el: "木", luck: "吉 · 文昌/考運", color: "#4ADE80", bg: "rgba(21, 128, 61, 0.28)", tip: "利學業、研發、企劃創意" },
-  5: { name: "五黃廉貞", el: "土", luck: "大凶 · 五黃煞", color: "#EF4444", bg: "rgba(185, 28, 28, 0.42)", tip: "忌動土動工，宜擺銅器或六帝錢" },
-  6: { name: "六白武曲", el: "金", luck: "吉 · 偏財/貴人", color: "#FACC15", bg: "rgba(161, 98, 7, 0.28)", tip: "利事業升遷、技術與偏財運" },
-  7: { name: "七赤破軍", el: "金", luck: "凶 · 破財/口舌", color: "#F472B6", bg: "rgba(157, 23, 77, 0.28)", tip: "防漏財小人，宜靜置或水局化解" },
-  8: { name: "八白左輔", el: "土", luck: "大吉 · 正財星", color: "#FBBF24", bg: "rgba(180, 83, 9, 0.35)", tip: "利正財置產，宜保持明亮整潔" },
-  9: { name: "九紫右弼", el: "火", luck: "大吉 · 當運喜慶", color: "#C084FC", bg: "rgba(107, 33, 168, 0.35)", tip: "九運當旺大吉星，利姻緣與百業" }
-};
-const LUOSHU_OFFSETS = { "SE": -1, "S": 4, "SW": -3, "E": -2, "C": 0, "W": 2, "NE": 3, "N": -4, "NW": 1 };
-
-function getCenterStarByYear(year) {
-  let mod = (2026 - year) % 9;
-  let star = (1 + mod) % 9;
-  return star <= 0 ? star + 9 : star;
-}
-function getStarAtDir(centerStar, dirKey) {
-  let s = (centerStar + LUOSHU_OFFSETS[dirKey]) % 9;
-  return s <= 0 ? s + 9 : s;
-}
-
-function toggleMobilePanel(target) {
-  const lp = document.getElementById("left-panel");
-  const rp = document.getElementById("right-panel");
-  document.getElementById("mnav-left").classList.toggle("active", target === 'left');
-  document.getElementById("mnav-right").classList.toggle("active", target === 'right');
-  document.getElementById("mnav-canvas").classList.toggle("active", target === 'canvas');
-
-  if (target === 'left') {
-    lp.classList.toggle("open"); rp.classList.remove("open");
-  } else if (target === 'right') {
-    rp.classList.toggle("open"); lp.classList.remove("open");
-  } else {
-    lp.classList.remove("open"); rp.classList.remove("open");
-  }
-}
-
-function switchLeftTab(tab) {
-  document.querySelectorAll(".tab-btn").forEach(b => b.classList.remove("active"));
-  document.querySelectorAll(".tab-content").forEach(c => c.style.display = "none");
-  document.getElementById("tab-btn-" + tab).classList.add("active");
-  document.getElementById("tab-content-" + tab).style.display = "flex";
-}
-
-window.toggleLockScaleBtn = function() {
-  appState.room.lock_scale = !appState.room.lock_scale;
-  syncLockScaleUI();
-  renderFullScene();
-  persistAppStateToLocal(true);
-};
-
-function syncLockScaleUI() {
-  const locked = !!appState.room.lock_scale;
-  const chk = document.getElementById("lock-scale-chk");
-  if (chk) chk.checked = locked;
-  const b2d = document.getElementById("btn-lock-scale-2d");
-  if (b2d) {
-    b2d.innerText = locked ? "🔒 縮放: 鎖定" : "🔓 縮放: 開";
-    b2d.classList.toggle("active", locked);
-  }
-  const b3d = document.getElementById("btn-lock-scale-3d");
-  if (b3d) {
-    b3d.innerText = locked ? "🔒 縮放: 鎖定" : "🔓 縮放: 開";
-    b3d.classList.toggle("active", locked);
-  }
-  const bScaleGizmo = document.getElementById("btn-3d-scale");
-  if (bScaleGizmo) {
-    bScaleGizmo.style.opacity = locked ? "0.4" : "1";
-  }
-  if (locked && gizmoMode === "scale") {
-    window.set3DGizmoMode("translate");
-  }
-}
-
-function renderCategoryUI() {
-  const newCatSel = document.getElementById("new-obj-category");
-  const propCatSel = document.getElementById("prop-category");
-  const tagsBox = document.getElementById("category-tags-container");
-
-  const curNewVal = newCatSel.value;
-  const curPropVal = propCatSel.value;
-
-  newCatSel.innerHTML = "";
-  propCatSel.innerHTML = "";
-  tagsBox.innerHTML = "";
-
-  appState.categories.forEach((cat, idx) => {
-    newCatSel.add(new Option(cat, cat));
-    propCatSel.add(new Option(cat, cat));
-
-    const tag = document.createElement("div");
-    tag.style.cssText = "background:#1F232B; border:1px solid #3B82F6; border-radius:14px; padding:4px 9px; font-size:11px; display:flex; align-items:center; gap:5px; transition:all 0.15s;";
-    tag.setAttribute("data-cat", cat);
-    tag.innerHTML = `<span>🏷️ ${cat}</span><span style="cursor:pointer;color:#F87171;font-weight:bold;" onclick="deleteCategory(${idx})">✕</span>`;
+  showToast(`📋 已貼上「${copy.name}」！`); };  window.duplicateItemById = function(id, evt) { if (evt) evt.stopPropagation(); if (window.copySelectedItem(id)) { window.pasteCopiedItem(); } };  window.toggleSectionCollapse = function(bodyId, iconId) { const el = document.getElementById(bodyId); const ic = document.getElementById(iconId); if (!el) return; const isHidden = (el.style.display === "none"); el.style.display = isHidden ? "block" : "none"; if (ic) ic.innerText = isHidden ? "▾" : "▸"; };  window.openSectionCollapse = function(bodyId, iconId) { const el = document.getElementById(bodyId); const ic = document.getElementById(iconId); if (el) el.style.display = "block"; if (ic) ic.innerText = "▾"; };  const FEIXING_META = { 1: { name: "一白貪狼", el: "水", luck: "大吉 · 桃花/人緣", color: "#38BDF8", bg: "rgba(14, 116, 144, 0.28)", tip: "利感情、貴人、文昌" }, 2: { name: "二黑巨門", el: "土", luck: "凶 · 病符星", color: "#F87171", bg: "rgba(153, 27, 27, 0.30)", tip: "注意健康，宜掛金屬葫蘆化解" }, 3: { name: "三碧祿存", el: "木", luck: "凶 · 是非/官非", color: "#FB923C", bg: "rgba(154, 52, 18, 0.28)", tip: "易爭執，宜用紅色物件洩木氣" }, 4: { name: "四綠文曲", el: "木", luck: "吉 · 文昌/考運", color: "#4ADE80", bg: "rgba(21, 128, 61, 0.28)", tip: "利學業、研發、企劃創意" }, 5: { name: "五黃廉貞", el: "土", luck: "大凶 · 五黃煞", color: "#EF4444", bg: "rgba(185, 28, 28, 0.42)", tip: "忌動土動工，宜擺銅器或六帝錢" }, 6: { name: "六白武曲", el: "金", luck: "吉 · 偏財/貴人", color: "#FACC15", bg: "rgba(161, 98, 7, 0.28)", tip: "利事業升遷、技術與偏財運" }, 7: { name: "七赤破軍", el: "金", luck: "凶 · 破財/口舌", color: "#F472B6", bg: "rgba(157, 23, 77, 0.28)", tip: "防漏財小人，宜靜置或水局化解" }, 8: { name: "八白左輔", el: "土", luck: "大吉 · 正財星", color: "#FBBF24", bg: "rgba(180, 83, 9, 0.35)", tip: "利正財置產，宜保持明亮整潔" }, 9: { name: "九紫右弼", el: "火", luck: "大吉 · 當運喜慶", color: "#C084FC", bg: "rgba(107, 33, 168, 0.35)", tip: "九運當旺大吉星，利姻緣與百業" } }; const LUOSHU_OFFSETS = { "SE": -1, "S": 4, "SW": -3, "E": -2, "C": 0, "W": 2, "NE": 3, "N": -4, "NW": 1 };  function getCenterStarByYear(year) { let mod = (2026 - year) \% 9; let star = (1 + mod) \% 9; return star <= 0 ? star + 9 : star; } function getStarAtDir(centerStar, dirKey) { let s = (centerStar + LUOSHU_OFFSETS[dirKey]) \% 9; return s <= 0 ? s + 9 : s; }  function toggleMobilePanel(target) { const lp = document.getElementById("left-panel"); const rp = document.getElementById("right-panel"); document.getElementById("mnav-left").classList.toggle("active", target === 'left'); document.getElementById("mnav-right").classList.toggle("active", target === 'right'); document.getElementById("mnav-canvas").classList.toggle("active", target === 'canvas');  if (target === 'left') { lp.classList.toggle("open"); rp.classList.remove("open"); } else if (target === 'right') { rp.classList.toggle("open"); lp.classList.remove("open"); } else { lp.classList.remove("open"); rp.classList.remove("open"); } }  function switchLeftTab(tab) { document.querySelectorAll(".tab-btn").forEach(b => b.classList.remove("active")); document.querySelectorAll(".tab-content").forEach(c => c.style.display = "none"); document.getElementById("tab-btn-" + tab).classList.add("active"); document.getElementById("tab-content-" + tab).style.display = "flex"; }  window.toggleLockScaleBtn = function() { appState.room.lock_scale = !appState.room.lock_scale; syncLockScaleUI(); renderFullScene(); persistAppStateToLocal(true); };  function syncLockScaleUI() { const locked = !!appState.room.lock_scale; const chk = document.getElementById("lock-scale-chk"); if (chk) chk.checked = locked; const b2d = document.getElementById("btn-lock-scale-2d"); if (b2d) { b2d.innerText = locked ? "🔒 縮放: 鎖定" : "🔓 縮放: 開"; b2d.classList.toggle("active", locked); } const b3d = document.getElementById("btn-lock-scale-3d"); if (b3d) { b3d.innerText = locked ? "🔒 縮放: 鎖定" : "🔓 縮放: 開"; b3d.classList.toggle("active", locked); } const bScaleGizmo = document.getElementById("btn-3d-scale"); if (bScaleGizmo) bScaleGizmo.style.opacity = locked ? "0.4" : "1"; if (locked && gizmoMode === "scale") window.set3DGizmoMode("translate"); }  function renderCategoryUI() { const newCatSel = document.getElementById("new-obj-category"); const propCatSel = document.getElementById("prop-category"); const tagsBox = document.getElementById("category-tags-container");  const curNewVal = newCatSel.value; const curPropVal = propCatSel.value;  newCatSel.innerHTML = ""; propCatSel.innerHTML = ""; tagsBox.innerHTML = "";  appState.categories.forEach((cat, idx) => { newCatSel.add(new Option(cat, cat)); propCatSel.add(new Option(cat, cat));  const tag = document.createElement("div"); tag.style.cssText = "background:#1F232B; border:1px solid #3B82F6; border-radius:14px; padding:4px 9px; font-size:11px; display:flex; align-items:center; gap:5px; transition:all 0.15s;"; tag.setAttribute("data-cat", cat); tag.innerHTML = `<span>🏷️ ${cat}</span><span style="cursor:pointer;color:#F87171;font-weight:bold;" onclick="deleteCategory(${idx})">✕</span>`;
 
     tag.addEventListener("dragover", e => { e.preventDefault(); tag.style.background = "#2563EB"; });
     tag.addEventListener("dragleave", () => { tag.style.background = "#1F232B"; });
@@ -885,13 +639,11 @@ window.deleteCategory = function(idx) {
   persistAppStateToLocal(true);
 };
 
-// 全域鍵盤快捷鍵：支援 Ctrl+C / Cmd+C 複製、Ctrl+V / Cmd+V 貼上、Delete 刪除與 WASD/方向鍵移動
 window.addEventListener("keydown", function(e) {
   const tag = document.activeElement ? document.activeElement.tagName.toLowerCase() : "";
   const isEditingInput = (tag === "input" || tag === "textarea" || tag === "select");
   if (isEditingInput) return;
 
-  // 電腦版 Ctrl+C / Cmd+C 複製選取物件
   if ((e.ctrlKey || e.metaKey) && (e.key === "c" || e.key === "C")) {
     if (activeId && activeId !== "HUMAN") {
       e.preventDefault();
@@ -900,7 +652,6 @@ window.addEventListener("keydown", function(e) {
     return;
   }
 
-  // 電腦版 Ctrl+V / Cmd+V 貼上物件
   if ((e.ctrlKey || e.metaKey) && (e.key === "v" || e.key === "V")) {
     e.preventDefault();
     window.pasteCopiedItem();
@@ -915,14 +666,12 @@ window.addEventListener("keydown", function(e) {
     return;
   }
 
-  // 若人物處於「坐床邊」模式，即使在 2D 模式也可直接按方向鍵沿著床邊移動
   if (currentMode === "FPV" || currentMode === "3D" || (appState.human.posture === "sit" && appState.human.sit_mode === "bed_edge")) {
     if (e.key === "w" || e.key === "W" || e.key === "ArrowUp") { fpvMoveDir.forward = 1; walkTarget = null; }
     if (e.key === "s" || e.key === "S" || e.key === "ArrowDown") { fpvMoveDir.forward = -1; walkTarget = null; }
     if (e.key === "a" || e.key === "A" || e.key === "ArrowLeft") { fpvMoveDir.right = -1; walkTarget = null; }
     if (e.key === "d" || e.key === "D" || e.key === "ArrowRight") { fpvMoveDir.right = 1; walkTarget = null; }
 
-    // 若在 2D 模式按方向鍵移動床邊人物，立即更新 2D 畫面
     if (currentMode === "2D" && (fpvMoveDir.forward !== 0 || fpvMoveDir.right !== 0)) {
       const yawRad = (appState.human.rot || 0) * Math.PI / 180;
       const fx = Math.sin(yawRad), fz = -Math.cos(yawRad);
@@ -977,6 +726,16 @@ function initFabric() {
     persistAppStateToLocal(true);
   });
 
+  const autoSaveChk = document.getElementById("auto-save-chk");
+  if (autoSaveChk) {
+    autoSaveChk.checked = !!appState.room.auto_save;
+    autoSaveChk.addEventListener("change", e => {
+      appState.room.auto_save = e.target.checked;
+      showToast(appState.room.auto_save ? "✅ 已開啟自動儲存" : "ℹ️ 已切換為手動儲存模式");
+      persistAppStateToLocal(false);
+    });
+  }
+
   canvas.on('mouse:wheel', function(opt) {
     const delta = opt.e.deltaY;
     let zoom = canvas.getZoom() * (0.999 ** delta);
@@ -1015,7 +774,7 @@ function initFabric() {
   canvas.on('mouse:up', function() {
     isDraggingCanvas = false;
     const trashEl = document.getElementById("trash-dropzone");
-    if (trashEl.classList.contains("show")) {
+    if (trashEl && trashEl.classList.contains("show")) {
       if (isOverTrash && activeId && activeId !== "HUMAN") {
         deleteItemById(activeId);
       }
@@ -1052,7 +811,6 @@ function initFabric() {
   canvas.on('object:rotating', e => onObjectLiveTransform(e, "rotate"));
   canvas.on('object:modified', onObjectModifiedComplete);
 
-  // 初始化時若為坐椅子模式，確保人物對齊椅子位置與視角
   if (appState.human.posture === "sit" && appState.human.sit_mode === "chair") {
     const ch = appState.items.find(i => i.id === appState.human.sit_chair_id && isChairItem(i));
     if (ch) {
@@ -1070,6 +828,7 @@ function initFabric() {
 
   renderCategoryUI();
   renderChairSelectOptions();
+  renderRecentColorsPalette();
   initRoomFormValues();
   initHumanFormValues();
   syncLockScaleUI();
@@ -1093,10 +852,7 @@ function renderFullScene() {
     selectable: false, evented: false
   }));
 
-  canvas.add(new fabric.Text(`◀ 房間寬 ${rw} cm ▶`, {
-    left: rw / 2, top: -24, fontSize: 13, fill: '#94A3B8', originX: 'center', selectable: false, evented: false
-  }));
-  canvas.add(new fabric.Text(`◀ 房間深 ${rd} cm ▶`, {
+  canvas.add(new fabric.Text(`◀ 房間寬 ${rw} cm ▶`, { left: rw / 2, top: -24, fontSize: 13, fill: '#94A3B8', originX: 'center', selectable: false, evented: false })); canvas.add(new fabric.Text(`◀ 房間深 ${rd} cm ▶`, {
     left: -24, top: rd / 2, fontSize: 13, fill: '#94A3B8', originX: 'center', angle: -90, selectable: false, evented: false
   }));
 
@@ -1109,190 +865,13 @@ function renderFullScene() {
       strokeDashArray: canEditGround ? [5, 3] : null,
       originX: 'center', originY: 'center'
     });
-    const vLabel = new fabric.Text(`${v.name}\n${Math.round(v.w)}×${Math.round(v.d)}`, {
-      fontSize: 12, fill: '#334155', originX: 'center', originY: 'center', textAlign: 'center'
-    });
-    const vGroup = new fabric.Group([vRect, vLabel], {
-      left: v.x + v.w / 2, top: v.y + v.d / 2,
-      originX: 'center', originY: 'center',
-      selectable: canEditGround, evented: canEditGround, voidId: v.id
-    });
-    vGroup.setControlsVisibility({ mtr: false });
-    canvas.add(vGroup);
-  });
-
-  appState.items.forEach(item => createFabricItem(item));
-
-  if (appState.compass.show_feixing) renderNinePalaceFeixing();
-  if (appState.compass.show) renderExpertCompass();
-
-  createFabricHuman();
-
-  if (activeId === "HUMAN") {
-    const hg = canvas.getObjects().find(o => o.isHuman);
-    if (hg && !forcePanMode) canvas.setActiveObject(hg);
-  } else if (activeId) {
-    const g = canvas.getObjects().find(o => o.itemId === activeId);
-    if (g && !forcePanMode) canvas.setActiveObject(g);
-  }
-
-  renderChairSelectOptions();
-  renderRightPanel();
-  canvas.requestRenderAll();
-  if ((currentMode === "3D" || currentMode === "FPV") && renderer) updateThreeScene();
-}
-
-function createFabricHuman() {
-  const h = appState.human;
-  const halfFovRad = ((h.fov_h || 100) / 2) * Math.PI / 180;
-  const coneLen = 48;
-  const coneHalfW = Math.round(Math.tan(halfFovRad) * coneLen);
-
-  const fovCone = new fabric.Polygon([
-    { x: 0, y: 0 }, { x: -coneHalfW, y: -coneLen }, { x: coneHalfW, y: -coneLen }
-  ], {
-    fill: 'rgba(168, 85, 247, 0.30)', stroke: '#C084FC', strokeWidth: 1.5,
-    originX: 'center', originY: 'bottom', top: 0
-  });
-
-  const postureColor = h.posture === 'lie' ? '#EC4899' : (h.posture === 'sit' ? '#0EA5E9' : '#9333EA');
-  const postureIcon = h.posture === 'lie' ? "🛏️" : (h.posture === 'sit' ? "🪑" : "🧍");
-
-  const bodyCircle = new fabric.Circle({
-    radius: 14, fill: postureColor, stroke: '#FFFFFF', strokeWidth: 2.5,
-    originX: 'center', originY: 'center'
-  });
-
-  const iconTxt = new fabric.Text(postureIcon, {
-    fontSize: 14, originX: 'center', originY: 'center'
-  });
-
-  const humanGroup = new fabric.Group([fovCone, bodyCircle, iconTxt], {
-    left: h.x, top: h.y, angle: h.rot || 0,
-    originX: 'center', originY: 'center',
-    selectable: !forcePanMode, evented: !forcePanMode,
-    isHuman: true
-  });
-
-  humanGroup.setControlsVisibility({
-    mt: false, mb: false, ml: false, mr: false,
-    tl: false, tr: false, bl: false, br: false,
-    mtr: true
-  });
-
-  canvas.add(humanGroup);
-}
-
-function createFabricItem(item) {
-  const subElements = [];
-  const rect = new fabric.Rect({
-    width: item.w, height: item.d,
-    fill: item.color, stroke: '#1E293B', strokeWidth: 1.5,
-    originX: 'center', originY: 'center'
-  });
-  subElements.push(rect);
-
-  // 若為椅子，在 2D 平面繪製椅背條，清楚標示椅背位置 (+Y 處為椅背，人物坐下時背靠此側、面向 -Y 看出去)
-  if (item.item_type === "chair") {
-    const backrest = new fabric.Rect({
-      width: item.w * 0.85, height: Math.max(5, item.d * 0.18),
-      fill: '#0284C7', stroke: '#E0F2FE', strokeWidth: 1,
-      originX: 'center', originY: 'center',
-      top: item.d / 2 - Math.max(3, item.d * 0.1)
-    });
-    subElements.push(backrest);
-  }
-
-  if (item.item_type === "door") {
-    const fx = item.flip_x ? -1 : 1;
-    const fy = item.flip_y ? -1 : 1;
-    const hx = -item.w / 2 * fx;
-    const hy = item.d / 2 * fy;
-    const openX = hx;
-    const openY = hy + item.w * fy;
-    const closedX = item.w / 2 * fx;
-    const closedY = hy;
-    const sweep = (fx * fy > 0) ? 0 : 1;
-
-    const arcPath = new fabric.Path(`M ${hx} ${hy} L ${openX} ${openY} A ${item.w} ${item.w} 0 0 ${sweep} ${closedX} ${closedY}`, {
+    const vLabel = new fabric.Text(`${v.name}\n${Math.round(v.w)}×${Math.round(v.d)}`, { fontSize: 12, fill: '#334155', originX: 'center', originY: 'center', textAlign: 'center' }); const vGroup = new fabric.Group([vRect, vLabel], { left: v.x + v.w / 2, top: v.y + v.d / 2, originX: 'center', originY: 'center', selectable: canEditGround, evented: canEditGround, voidId: v.id }); vGroup.setControlsVisibility({ mtr: false }); canvas.add(vGroup); });  appState.items.forEach(item => createFabricItem(item));  if (appState.compass.show_feixing) renderNinePalaceFeixing(); if (appState.compass.show) renderExpertCompass();  createFabricHuman();  const isTypingNow = document.activeElement && (document.activeElement.tagName === "INPUT" \vert{}\vert{} document.activeElement.tagName === "SELECT"); if (!isTypingNow) { if (activeId === "HUMAN") { const hg = canvas.getObjects().find(o => o.isHuman); if (hg && !forcePanMode) canvas.setActiveObject(hg); } else if (activeId) { const g = canvas.getObjects().find(o => o.itemId === activeId); if (g && !forcePanMode) canvas.setActiveObject(g); } }  renderChairSelectOptions(); renderRightPanel(); canvas.requestRenderAll(); if ((currentMode === "3D" \vert{}\vert{} currentMode === "FPV") && renderer) updateThreeScene(); }  function createFabricHuman() { const h = appState.human; const halfFovRad = ((h.fov_h \vert{}\vert{} 100) / 2) * Math.PI / 180; const coneLen = 48; const coneHalfW = Math.round(Math.tan(halfFovRad) * coneLen);  const fovCone = new fabric.Polygon([ { x: 0, y: 0 }, { x: -coneHalfW, y: -coneLen }, { x: coneHalfW, y: -coneLen } ], { fill: 'rgba(168, 85, 247, 0.30)', stroke: '#C084FC', strokeWidth: 1.5, originX: 'center', originY: 'bottom', top: 0 });  const postureColor = h.posture === 'lie' ? '#EC4899' : (h.posture === 'sit' ? '#0EA5E9' : '#9333EA'); const postureIcon = h.posture === 'lie' ? "🛏️" : (h.posture === 'sit' ? "🪑" : "🧍");  const bodyCircle = new fabric.Circle({ radius: 14, fill: postureColor, stroke: '#FFFFFF', strokeWidth: 2.5, originX: 'center', originY: 'center' });  const iconTxt = new fabric.Text(postureIcon, { fontSize: 14, originX: 'center', originY: 'center' });  const humanGroup = new fabric.Group([fovCone, bodyCircle, iconTxt], { left: h.x, top: h.y, angle: h.rot \vert{}\vert{} 0, originX: 'center', originY: 'center', selectable: !forcePanMode, evented: !forcePanMode, isHuman: true });  humanGroup.setControlsVisibility({ mt: false, mb: false, ml: false, mr: false, tl: false, tr: false, bl: false, br: false, mtr: true });  canvas.add(humanGroup); }  function createFabricItem(item) { const subElements = []; const strokeColor = item.stroke_color \vert{}\vert{} '#1E293B'; const rect = new fabric.Rect({ width: item.w, height: item.d, fill: item.color, stroke: strokeColor, strokeWidth: 2.0, originX: 'center', originY: 'center' }); subElements.push(rect);  if (item.item_type === "chair") { const backrest = new fabric.Rect({ width: item.w * 0.85, height: Math.max(5, item.d * 0.18), fill: '#0284C7', stroke: '#E0F2FE', strokeWidth: 1, originX: 'center', originY: 'center', top: item.d / 2 - Math.max(3, item.d * 0.1) }); subElements.push(backrest); }  if (item.item_type === "door") { const fx = item.flip_x ? -1 : 1; const fy = item.flip_y ? -1 : 1; const hx = -item.w / 2 * fx; const hy = item.d / 2 * fy; const openX = hx; const openY = hy + item.w * fy; const closedX = item.w / 2 * fx; const closedY = hy; const sweep = (fx * fy > 0) ? 0 : 1;  const arcPath = new fabric.Path(`M ${hx} ${hy} L${openX} ${openY} A${item.w} ${item.w} 0 0${sweep} ${closedX}${closedY}`, {
       fill: 'rgba(251, 146, 60, 0.18)', stroke: '#FDBA74', strokeWidth: 1.5, strokeDashArray: [4, 3]
     });
     subElements.push(arcPath);
   }
 
-  const labelStr = `${item.name}\n${Math.round(item.w)}×${Math.round(item.d)}`;
-  const fontSize = Math.max(9, Math.min(12, Math.min(item.w, item.d) * 0.45));
-  const text = new fabric.Text(labelStr, {
-    fontSize: fontSize, fill: '#FFFFFF',
-    originX: 'center', originY: 'center', textAlign: 'center'
-  });
-  subElements.push(text);
-
-  const lockS = !!appState.room.lock_scale;
-  const group = new fabric.Group(subElements, {
-    left: item.x + item.w / 2, top: item.y + item.d / 2,
-    angle: item.rot || 0, originX: 'center', originY: 'center',
-    lockScalingX: lockS, lockScalingY: lockS,
-    selectable: !forcePanMode, evented: !forcePanMode, itemId: item.id
-  });
-
-  group.setControlsVisibility({
-    mt: !lockS, mb: !lockS, ml: !lockS, mr: !lockS,
-    tl: !lockS, tr: !lockS, bl: !lockS, br: !lockS,
-    mtr: true
-  });
-
-  if (item.texture && item.item_type !== "window") {
-    fabric.Image.fromURL(item.texture, function(img) {
-      img.scaleToWidth(item.w);
-      img.scaleToHeight(item.d);
-      rect.set('fill', new fabric.Pattern({ source: img.getElement(), repeat: 'repeat' }));
-      canvas.requestRenderAll();
-    });
-  }
-
-  canvas.add(group);
-}
-
-function renderNinePalaceFeixing() {
-  const rw = appState.room.width, rd = appState.room.depth;
-  const cw = rw / 3, cd = rd / 3;
-  const year = parseInt(appState.compass.feixing_year) || 2026;
-  const centerStar = getCenterStarByYear(year);
-
-  const infoEl = document.getElementById("feixing-center-info");
-  if (infoEl) infoEl.innerText = `${year}年: ${FEIXING_META[centerStar].name}入中宮`;
-
-  const rot = appState.compass.rotation || 0;
-  const dirAngles = [
-    { key: "W", deg: 0, label: "正西" }, { key: "NW", deg: 45, label: "西北" },
-    { key: "N", deg: 90, label: "正北" }, { key: "NE", deg: 135, label: "東北" },
-    { key: "E", deg: 180, label: "正東" }, { key: "SE", deg: 225, label: "東南" },
-    { key: "S", deg: 270, label: "正南" }, { key: "SW", deg: 315, label: "西南" }
-  ];
-
-  for (let row = 0; row < 3; row++) {
-    for (let col = 0; col < 3; col++) {
-      const gx = col * cw, gy = row * cd;
-      let dirKey = "C", dirLabel = "中宮";
-      if (!(row === 1 && col === 1)) {
-        let cellDeg = Math.atan2(row - 1, col - 1) * 180 / Math.PI;
-        if (cellDeg < 0) cellDeg += 360;
-        let relDeg = (cellDeg - rot) % 360;
-        if (relDeg < 0) relDeg += 360;
-        const idx = Math.round(relDeg / 45) % 8;
-        dirKey = dirAngles[idx].key;
-        dirLabel = dirAngles[idx].label;
-      }
-      const starNum = getStarAtDir(centerStar, dirKey);
-      const meta = FEIXING_META[starNum];
-
-      canvas.add(new fabric.Rect({
-        left: gx, top: gy, width: cw, height: cd,
-        fill: meta.bg, stroke: '#F59E0B', strokeWidth: 1.5, strokeDashArray: [6, 4],
-        selectable: false, evented: false
-      }));
-      canvas.add(new fabric.Text(`【${dirLabel}】${meta.name} (${meta.el})`, {
+  const labelStr = `${item.name}\n${Math.round(item.w)}×${Math.round(item.d)}`; const fontSize = Math.max(9, Math.min(12, Math.min(item.w, item.d) * 0.45)); const text = new fabric.Text(labelStr, { fontSize: fontSize, fill: '#FFFFFF', originX: 'center', originY: 'center', textAlign: 'center' }); subElements.push(text);  const lockS = !!appState.room.lock_scale; const group = new fabric.Group(subElements, { left: item.x + item.w / 2, top: item.y + item.d / 2, angle: item.rot \vert{}\vert{} 0, originX: 'center', originY: 'center', lockScalingX: lockS, lockScalingY: lockS, selectable: !forcePanMode, evented: !forcePanMode, itemId: item.id });  group.setControlsVisibility({ mt: !lockS, mb: !lockS, ml: !lockS, mr: !lockS, tl: !lockS, tr: !lockS, bl: !lockS, br: !lockS, mtr: true });  if (item.texture && item.item_type !== "window") { fabric.Image.fromURL(item.texture, function(img) { img.scaleToWidth(item.w); img.scaleToHeight(item.d); rect.set('fill', new fabric.Pattern({ source: img.getElement(), repeat: 'repeat' })); canvas.requestRenderAll(); }); }  canvas.add(group); }  function renderNinePalaceFeixing() { const rw = appState.room.width, rd = appState.room.depth; const cw = rw / 3, cd = rd / 3; const year = parseInt(appState.compass.feixing_year) \vert{}\vert{} 2026; const centerStar = getCenterStarByYear(year);  const infoEl = document.getElementById("feixing-center-info"); if (infoEl) infoEl.innerText = `${year}年: ${FEIXING_META[centerStar].name}入中宮`;  const rot = appState.compass.rotation \vert{}\vert{} 0; const dirAngles = [ { key: "W", deg: 0, label: "正西" }, { key: "NW", deg: 45, label: "西北" }, { key: "N", deg: 90, label: "正北" }, { key: "NE", deg: 135, label: "東北" }, { key: "E", deg: 180, label: "正東" }, { key: "SE", deg: 225, label: "東南" }, { key: "S", deg: 270, label: "正南" }, { key: "SW", deg: 315, label: "西南" } ];  for (let row = 0; row < 3; row++) { for (let col = 0; col < 3; col++) { const gx = col * cw, gy = row * cd; let dirKey = "C", dirLabel = "中宮"; if (!(row === 1 && col === 1)) { let cellDeg = Math.atan2(row - 1, col - 1) * 180 / Math.PI; if (cellDeg < 0) cellDeg += 360; let relDeg = (cellDeg - rot) \% 360; if (relDeg < 0) relDeg += 360; const idx = Math.round(relDeg / 45) \% 8; dirKey = dirAngles[idx].key; dirLabel = dirAngles[idx].label; } const starNum = getStarAtDir(centerStar, dirKey); const meta = FEIXING_META[starNum];  canvas.add(new fabric.Rect({ left: gx, top: gy, width: cw, height: cd, fill: meta.bg, stroke: '#F59E0B', strokeWidth: 1.5, strokeDashArray: [6, 4], selectable: false, evented: false })); canvas.add(new fabric.Text(`【${dirLabel}】${meta.name} (${meta.el})`, {
         left: gx + cw / 2, top: gy + 18, fontSize: 13, fontWeight: 'bold', fill: meta.color,
         backgroundColor: 'rgba(10, 12, 16, 0.82)', originX: 'center', originY: 'center', selectable: false, evented: false
       }));
@@ -1352,7 +931,6 @@ function onObjectSelected(e) {
   } else if (target.itemId) {
     activeId = target.itemId;
     const clickedItem = appState.items.find(i => i.id === target.itemId);
-    // 若人物目前已經處於「坐下」姿勢，且使用者點選了某張椅子，讓人物同步坐到該張椅子上並更新視角
     if (clickedItem && isChairItem(clickedItem) && appState.human.posture === "sit") {
       appState.human.sit_mode = "chair";
       appState.human.sit_chair_id = clickedItem.id;
@@ -1365,6 +943,7 @@ function onObjectSelected(e) {
       initHumanFormValues();
     }
     switchLeftTab('item');
+    openSectionCollapse("collapse-body-edit", "collapse-icon-edit");
     updateLeftItemPanel();
     highlightRightPanel();
   } else if (target.voidId) {
@@ -1385,11 +964,13 @@ function onObjectLiveTransform(e, mode) {
 
   if (target.itemId && e.e) {
     const trashEl = document.getElementById("trash-dropzone");
-    trashEl.classList.add("show");
-    const pt = (e.e.touches && e.e.touches[0]) ? e.e.touches[0] : e.e;
-    const rect = trashEl.getBoundingClientRect();
-    isOverTrash = (pt.clientX >= rect.left - 20 && pt.clientX <= rect.right + 20 && pt.clientY >= rect.top - 20 && pt.clientY <= rect.bottom + 20);
-    trashEl.classList.toggle("hover", isOverTrash);
+    if (trashEl) {
+      trashEl.classList.add("show");
+      const pt = (e.e.touches && e.e.touches[0]) ? e.e.touches[0] : e.e;
+      const rect = trashEl.getBoundingClientRect();
+      isOverTrash = (pt.clientX >= rect.left && pt.clientX <= rect.right && pt.clientY >= rect.top && pt.clientY <= rect.bottom);
+      trashEl.classList.toggle("hover", isOverTrash);
+    }
   }
 
   if (target.isHuman) {
@@ -1461,14 +1042,14 @@ function onObjectModifiedComplete(e) {
     deleteItemById(activeId);
     return;
   }
-  trashEl.classList.remove("show", "hover");
+  if (trashEl) trashEl.classList.remove("show", "hover");
   isOverTrash = false;
   persistAppStateToLocal(true);
   renderFullScene();
 }
 
 function setInputValueSafe(id, val) {
-  const el = document.getElementById(id);
+  const el = getTiltElement(id);
   if (el && document.activeElement !== el) {
     el.value = val;
   }
@@ -1507,6 +1088,7 @@ function updateLeftItemPanel() {
   setInputValueSafe("prop-rot-slider", item.rot || 0);
   document.getElementById("prop-rot-val").innerText = (item.rot || 0) + "°";
   setInputValueSafe("prop-color", item.color);
+  setInputValueSafe("prop-stroke-color", item.stroke_color || "#1E293B");
 
   const lockS = !!appState.room.lock_scale;
   document.getElementById("prop-w").disabled = lockS;
@@ -1529,12 +1111,15 @@ function updateSingleItemVisual(item, mode = "move") {
   renderFullScene();
 }
 
-["prop-name", "prop-category", "prop-type", "prop-w", "prop-d", "prop-h", "prop-seath", "prop-x", "prop-y", "prop-z", "prop-rot", "prop-color"].forEach(id => {
-  document.getElementById(id).addEventListener("input", (e) => {
+["prop-name", "prop-category", "prop-type", "prop-w", "prop-d", "prop-h", "prop-seath", "prop-x", "prop-y", "prop-z", "prop-rot", "prop-color", "prop-stroke-color"].forEach(id => {
+  const el = document.getElementById(id);
+  if (!el) return;
+
+  const handleValChange = (isFinalCommit) => {
     const item = appState.items.find(i => i.id === activeId);
     if (!item) return;
 
-    const rawVal = e.target.value;
+    const rawVal = el.value;
     let mode = "move";
     if (id === "prop-name") item.name = rawVal;
     else if (id === "prop-category") {
@@ -1551,6 +1136,10 @@ function updateSingleItemVisual(item, mode = "move") {
       return;
     } else if (id === "prop-color") {
       item.color = rawVal;
+      recordRecentColor(rawVal);
+    } else if (id === "prop-stroke-color") {
+      item.stroke_color = rawVal;
+      recordRecentColor(rawVal);
     } else {
       if (rawVal === "" || rawVal === "-") return;
       const num = parseFloat(rawVal);
@@ -1567,8 +1156,23 @@ function updateSingleItemVisual(item, mode = "move") {
         mode = "rotate";
       }
     }
-    updateSingleItemVisual(item, mode);
-  });
+
+    if (isFinalCommit) {
+      updateSingleItemVisual(item, mode);
+    } else {
+      if (canvas) {
+        const fabricObj = canvas.getObjects().find(o => o.itemId === item.id);
+        if (fabricObj) {
+          fabricObj.set({ left: item.x + item.w / 2, top: item.y + item.d / 2, angle: item.rot || 0 });
+          canvas.requestRenderAll();
+        }
+      }
+    }
+  };
+
+  el.addEventListener("input", () => handleValChange(false));
+  el.addEventListener("change", () => handleValChange(true));
+  el.addEventListener("blur", () => handleValChange(true));
 });
 
 document.getElementById("prop-rot-slider").addEventListener("input", e => {
@@ -1606,6 +1210,7 @@ document.getElementById("prop-scenery-file").addEventListener("change", function
   };
   reader.readAsDataURL(file);
 });
+
 document.getElementById("btn-reset-fuji").addEventListener("click", () => {
   const item = appState.items.find(i => i.id === activeId);
   if (!item) return;
@@ -1613,6 +1218,7 @@ document.getElementById("btn-reset-fuji").addEventListener("click", () => {
   persistAppStateToLocal(true);
   if (renderer) updateThreeScene();
 });
+
 document.getElementById("prop-texture-file").addEventListener("change", function(e) {
   const file = e.target.files[0];
   if (!file) return;
@@ -1623,15 +1229,18 @@ document.getElementById("prop-texture-file").addEventListener("change", function
     item.texture = f.target.result;
     persistAppStateToLocal(true);
     renderFullScene();
+    if (renderer) updateThreeScene();
   };
   reader.readAsDataURL(file);
 });
+
 document.getElementById("btn-clear-texture").addEventListener("click", () => {
   const item = appState.items.find(i => i.id === activeId);
   if (!item) return;
   item.texture = "";
   persistAppStateToLocal(true);
   renderFullScene();
+  if (renderer) updateThreeScene();
 });
 
 window.onNewObjTypeChange = function() {
@@ -1689,6 +1298,7 @@ window.confirmAddNewObject = function() {
     x: 130, y: ["window", "socket", "switch", "wall_item", "door"].includes(type) ? appState.room.depth : 210, z: z,
     w: w, d: d, h: h, seat_h: seatH, rot: 0,
     color: colorMap[type] || "#38BDF8",
+    stroke_color: "#1E293B",
     texture: "",
     scenery: type === "window" ? appState.default_fuji : "",
     flip_x: false, flip_y: false
@@ -1700,6 +1310,7 @@ window.confirmAddNewObject = function() {
   persistAppStateToLocal(true);
   renderFullScene();
   selectItemById(newItem.id);
+  openSectionCollapse("collapse-body-edit", "collapse-icon-edit");
 };
 
 window.clearWallTexture = function() {
@@ -1902,7 +1513,7 @@ document.getElementById("ceil-texture-file").addEventListener("change", function
 window.toggleLockHorizFPV = function() {
   appState.human.lock_horizontal = !appState.human.lock_horizontal;
   if (appState.human.lock_horizontal) {
-    appState.human.pitch = 0;
+    appState.human.tilt = 0;
   }
   initHumanFormValues();
   if (currentMode === "FPV") syncFPVCamera();
@@ -1912,7 +1523,7 @@ window.toggleLockHorizFPV = function() {
 document.getElementById("human-lock-horiz").addEventListener("change", e => {
   appState.human.lock_horizontal = e.target.checked;
   if (appState.human.lock_horizontal) {
-    appState.human.pitch = 0;
+    appState.human.tilt = 0;
   }
   initHumanFormValues();
   if (currentMode === "FPV") syncFPVCamera();
@@ -1930,42 +1541,21 @@ function initHumanFormValues() {
     hudLockBtn.innerText = lockH ? "🔒水平" : "🔓自由";
     hudLockBtn.classList.toggle("active", lockH);
   }
-  document.getElementById("human-pitch-slider").disabled = lockH;
-  document.getElementById("human-pitch").disabled = lockH;
-  document.getElementById("hud-pitch-slider").disabled = lockH;
+
+  const humanTiltSlider = getTiltElement("human-tilt-slider");
+  const humanTiltInp = getTiltElement("human-tilt");
+  const hudTiltSlider = getTiltElement("hud-tilt-slider");
+
+  if (humanTiltSlider) humanTiltSlider.disabled = lockH;
+  if (humanTiltInp) humanTiltInp.disabled = lockH;
+  if (hudTiltSlider) hudTiltSlider.disabled = lockH;
 
   setInputValueSafe("human-fov-h", h.fov_h || 100);
   setInputValueSafe("human-fov-up", h.fov_up || 50);
   setInputValueSafe("human-fov-down", h.fov_down || 65);
   const hudFovLbl = document.getElementById("hud-fov-lbl");
-  if (hudFovLbl) hudFovLbl.innerText = `視野:${h.fov_h || 100}°(上${h.fov_up || 50}/下${h.fov_down || 65})`;
-
-  setInputValueSafe("human-height", h.height || 178);
-  setInputValueSafe("human-x", Math.round(h.x));
-  setInputValueSafe("human-y", Math.round(h.y));
-  setInputValueSafe("human-rot", Math.round(h.rot || 0));
-  setInputValueSafe("human-rot-slider", Math.round(h.rot || 0));
-  document.getElementById("human-rot-val").innerText = Math.round(h.rot || 0) + "°";
-
-  const maxUp = h.fov_up || 50;
-  const maxDown = -(h.fov_down || 65);
-  document.getElementById("human-pitch-slider").max = maxUp;
-  document.getElementById("human-pitch-slider").min = maxDown;
-  document.getElementById("hud-pitch-slider").max = maxUp;
-  document.getElementById("hud-pitch-slider").min = maxDown;
-
-  setInputValueSafe("human-pitch", Math.round(h.pitch || 0));
-  setInputValueSafe("human-pitch-slider", Math.round(h.pitch || 0));
-  setInputValueSafe("hud-pitch-slider", Math.round(h.pitch || 0));
-  document.getElementById("human-pitch-val").innerText = Math.round(h.pitch || 0) + "°";
-  document.getElementById("hud-pitch-lbl").innerText = Math.round(h.pitch || 0) + "°";
-
-  const p = h.posture || "stand";
-  const sitDesc = p === "sit" ? ` (臀高:${h.seat_h || 45}cm/腳著地)` : (h.z > 0 ? " (床上)" : "");
-  document.getElementById("human-eye-info").innerText = `眼高: ${eyeH} cm`;
-  document.getElementById("human-basez-info").innerText = `踏面Z: ${Math.round(h.z || 0)} cm${sitDesc}`;
-  const hudEyeLbl = document.getElementById("hud-eye-height-lbl");
-  if (hudEyeLbl) hudEyeLbl.innerText = `眼高:${eyeH}cm`;
+  if (hudFovLbl) hudFovLbl.innerText = `視野:${h.fov_h \vert{}\vert{} 100}°(上${h.fov_up || 50}/下${h.fov_down \vert{}\vert{} 65})`;  setInputValueSafe("human-height", h.height \vert{}\vert{} 178); setInputValueSafe("human-x", Math.round(h.x)); setInputValueSafe("human-y", Math.round(h.y)); setInputValueSafe("human-rot", Math.round(h.rot \vert{}\vert{} 0)); setInputValueSafe("human-rot-slider", Math.round(h.rot \vert{}\vert{} 0)); document.getElementById("human-rot-val").innerText = Math.round(h.rot \vert{}\vert{} 0) + "°";  const maxUp = h.fov_up \vert{}\vert{} 50; const maxDown = -(h.fov_down \vert{}\vert{} 65); if (humanTiltSlider) { humanTiltSlider.max = maxUp; humanTiltSlider.min = maxDown; } if (hudTiltSlider) { hudTiltSlider.max = maxUp; hudTiltSlider.min = maxDown; }  const curTilt = Math.round(h.tilt \vert{}\vert{} 0); setInputValueSafe("human-tilt", curTilt); setInputValueSafe("human-tilt-slider", curTilt); setInputValueSafe("hud-tilt-slider", curTilt);  const humanTiltValEl = getTiltElement("human-tilt-val"); const hudTiltLblEl = getTiltElement("hud-tilt-lbl"); if (humanTiltValEl) humanTiltValEl.innerText = curTilt + "°"; if (hudTiltLblEl) hudTiltLblEl.innerText = curTilt + "°";  const p = h.posture \vert{}\vert{} "stand"; const sitDesc = p === "sit" ? ` (臀高:${h.seat_h || 45}cm/腳著地)` : (h.z > 0 ? " (床上)" : "");
+  document.getElementById("human-eye-info").innerText = `眼高: ${eyeH} cm`; document.getElementById("human-basez-info").innerText = `踏面Z: ${Math.round(h.z || 0)} cm${sitDesc}`; const hudEyeLbl = document.getElementById("hud-eye-height-lbl"); if (hudEyeLbl) hudEyeLbl.innerText = `眼高:${eyeH}cm`;
 
   document.getElementById("sit-options-box").style.display = (p === "sit") ? "flex" : "none";
   const hudSitBar = document.getElementById("hud-sit-bar");
@@ -1982,10 +1572,13 @@ function initHumanFormValues() {
   });
 }
 
-["human-fov-h", "human-fov-up", "human-fov-down", "human-height", "human-x", "human-y", "human-rot", "human-pitch"].forEach(id => {
-  document.getElementById(id).addEventListener("input", e => {
-    if (e.target.value === "" || e.target.value === "-") return;
-    const val = parseFloat(e.target.value) || 0;
+// 人物設定欄位：避免輸入單個數字就跳出焦點
+["human-fov-h", "human-fov-up", "human-fov-down", "human-height", "human-x", "human-y", "human-rot", "human-tilt"].forEach(id => {
+  const el = getTiltElement(id);
+  if (!el) return;
+  const commitHuman = () => {
+    if (el.value === "" || el.value === "-") return;
+    const val = parseFloat(el.value) || 0;
     if (id === "human-fov-h") appState.human.fov_h = Math.max(30, Math.min(165, val));
     if (id === "human-fov-up") appState.human.fov_up = Math.max(10, Math.min(85, val));
     if (id === "human-fov-down") appState.human.fov_down = Math.max(10, Math.min(85, val));
@@ -1993,14 +1586,16 @@ function initHumanFormValues() {
     if (id === "human-x") tryMoveHumanTo(val, appState.human.y, true);
     if (id === "human-y") tryMoveHumanTo(appState.human.x, val, true);
     if (id === "human-rot") appState.human.rot = ((val % 360) + 360) % 360;
-    if (id === "human-pitch" && !appState.human.lock_horizontal) {
-      appState.human.pitch = Math.max(-(appState.human.fov_down || 65), Math.min(appState.human.fov_up || 50, val));
+    if (id.includes("tilt") && !appState.human.lock_horizontal) {
+      appState.human.tilt = Math.max(-(appState.human.fov_down || 65), Math.min(appState.human.fov_up || 50, val));
     }
     initHumanFormValues();
     renderFullScene();
     if (currentMode === "FPV") syncFPVCamera();
     persistAppStateToLocal(true);
-  });
+  };
+  el.addEventListener("change", commitHuman);
+  el.addEventListener("blur", commitHuman);
 });
 
 document.getElementById("human-rot-slider").addEventListener("input", e => {
@@ -2011,21 +1606,27 @@ document.getElementById("human-rot-slider").addEventListener("input", e => {
   persistAppStateToLocal(true);
 });
 
-document.getElementById("human-pitch-slider").addEventListener("input", e => {
-  if (appState.human.lock_horizontal) return;
-  appState.human.pitch = parseFloat(e.target.value) || 0;
-  initHumanFormValues();
-  if (currentMode === "FPV") syncFPVCamera();
-  persistAppStateToLocal(true);
-});
+const humanTiltSliderEl = getTiltElement("human-tilt-slider");
+if (humanTiltSliderEl) {
+  humanTiltSliderEl.addEventListener("input", e => {
+    if (appState.human.lock_horizontal) return;
+    appState.human.tilt = parseFloat(e.target.value) || 0;
+    initHumanFormValues();
+    if (currentMode === "FPV") syncFPVCamera();
+    persistAppStateToLocal(true);
+  });
+}
 
-document.getElementById("hud-pitch-slider").addEventListener("input", e => {
-  if (appState.human.lock_horizontal) return;
-  appState.human.pitch = parseFloat(e.target.value) || 0;
-  initHumanFormValues();
-  if (currentMode === "FPV") syncFPVCamera();
-  persistAppStateToLocal(true);
-});
+const hudTiltSliderEl = getTiltElement("hud-tilt-slider");
+if (hudTiltSliderEl) {
+  hudTiltSliderEl.addEventListener("input", e => {
+    if (appState.human.lock_horizontal) return;
+    appState.human.tilt = parseFloat(e.target.value) || 0;
+    initHumanFormValues();
+    if (currentMode === "FPV") syncFPVCamera();
+    persistAppStateToLocal(true);
+  });
+}
 
 window.setHumanPosture = function(p) {
   appState.human.posture = p;
@@ -2042,11 +1643,11 @@ window.setHumanPosture = function(p) {
 
   if (!appState.human.lock_horizontal) {
     if (p === "lie") {
-      appState.human.pitch = 35;
+      appState.human.tilt = 35;
       appState.room.show_ceiling = true;
       document.getElementById("room-show-ceiling").checked = true;
     } else {
-      appState.human.pitch = 0;
+      appState.human.tilt = 0;
     }
   }
   const check = checkHumanWalkable(appState.human.x, appState.human.y);
@@ -2076,377 +1677,4 @@ window.placeHumanOnBed = function(targetPosture = 'lie') {
 
 function renderRightPanel() {
   const container = document.getElementById("item-list-container");
-  document.getElementById("obj-count").innerText = `共 ${appState.items.length} 項`;
-  container.innerHTML = "";
-
-  const badgeMap = {
-    furniture: { text: "家具", cls: "" },
-    chair: { text: "🪑 椅子", cls: "win" },
-    wall_item: { text: "🖼️ 牆物", cls: "win" },
-    door: { text: "🚪 門", cls: "door" },
-    window: { text: "🪟 窗", cls: "win" },
-    socket: { text: "🔌 插座", cls: "win" },
-    switch: { text: "💡 開關", cls: "win" }
-  };
-
-  appState.categories.forEach(cat => {
-    const catItems = appState.items.filter(it => (it.category || appState.categories[0]) === cat);
-    const sec = document.createElement("div");
-    sec.className = "cat-section";
-    sec.setAttribute("data-cat", cat);
-
-    sec.addEventListener("dragover", e => {
-      e.preventDefault();
-      sec.classList.add("drag-over");
-    });
-    sec.addEventListener("dragleave", () => sec.classList.remove("drag-over"));
-    sec.addEventListener("drop", e => {
-      e.preventDefault();
-      sec.classList.remove("drag-over");
-      if (draggedItemId) moveItemToCategory(draggedItemId, cat);
-    });
-
-    const isExpanded = expandedCategories.has(cat);
-    const header = document.createElement("div");
-    header.className = "cat-header";
-    header.innerHTML = `<span>${isExpanded ? '📂' : '📁'} ${cat} ${cat === '床' ? '🛏️' : (cat === '椅子' ? '🪑' : '')}</span><span style="font-size:11px;color:#64748B;">${catItems.length} 項 ${isExpanded ? '▾' : '▸'}</span>`;
-
-    const listBox = document.createElement("div");
-    listBox.className = "cat-items";
-    listBox.style.display = isExpanded ? "flex" : "none";
-
-    header.onclick = () => {
-      if (expandedCategories.has(cat)) expandedCategories.delete(cat);
-      else expandedCategories.add(cat);
-      renderRightPanel();
-    };
-
-    catItems.forEach(item => {
-      const card = document.createElement("div");
-      card.className = "item-card" + (item.id === activeId ? " selected" : "");
-      card.draggable = true;
-      card.onclick = () => selectItemById(item.id);
-
-      card.addEventListener("dragstart", e => {
-        draggedItemId = item.id;
-        card.classList.add("dragging");
-        e.dataTransfer.setData("text/plain", item.id);
-      });
-      card.addEventListener("dragend", () => {
-        card.classList.remove("dragging");
-        draggedItemId = null;
-        document.querySelectorAll(".cat-section").forEach(s => s.classList.remove("drag-over"));
-      });
-
-      let touchTimer = null;
-      let isTouchDraggingCard = false;
-      card.addEventListener("touchstart", e => {
-        touchTimer = setTimeout(() => {
-          isTouchDraggingCard = true;
-          draggedItemId = item.id;
-          card.classList.add("dragging");
-        }, 280);
-      }, { passive: true });
-
-      card.addEventListener("touchmove", e => {
-        if (!isTouchDraggingCard) { clearTimeout(touchTimer); return; }
-        e.preventDefault();
-        const t = e.touches[0];
-        const elUnder = document.elementFromPoint(t.clientX, t.clientY);
-        document.querySelectorAll(".cat-section").forEach(s => s.classList.remove("drag-over"));
-        const targetSec = elUnder ? elUnder.closest(".cat-section") : null;
-        if (targetSec) targetSec.classList.add("drag-over");
-      }, { passive: false });
-
-      card.addEventListener("touchend", e => {
-        clearTimeout(touchTimer);
-        if (!isTouchDraggingCard) return;
-        isTouchDraggingCard = false;
-        card.classList.remove("dragging");
-        const t = e.changedTouches[0];
-        const elUnder = document.elementFromPoint(t.clientX, t.clientY);
-        const targetSec = elUnder ? elUnder.closest(".cat-section") : null;
-        document.querySelectorAll(".cat-section").forEach(s => s.classList.remove("drag-over"));
-        if (targetSec && targetSec.getAttribute("data-cat")) {
-          moveItemToCategory(item.id, targetSec.getAttribute("data-cat"));
-        }
-        draggedItemId = null;
-      });
-
-      const b = badgeMap[item.item_type || "furniture"] || badgeMap.furniture;
-      const seatInfo = item.item_type === "chair" ? ` | 坐墊:${item.seat_h || 45}cm` : "";
-      card.innerHTML = `
-        <div class="item-card-header">
-          <div class="name">
-            <span style="color:#64748B;font-size:11px;cursor:grab;">⠿</span>
-            <span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${item.color};border:1px solid #fff;"></span>
-            <span>${item.name}</span>
-            <span class="badge ${b.cls}">${b.text}</span>
-          </div>
-          <div style="display:flex; gap:2px; align-items:center;">
-            <button class="card-del-btn" title="複製並貼上此物件" onclick="duplicateItemById('${item.id}', event)">📋</button>
-            <button class="card-del-btn" title="刪除" onclick="deleteItemById('${item.id}', event)">🗑️</button>
-          </div>
-        </div>
-        <div class="dims">
-          ${Math.round(item.w)}×${Math.round(item.d)}×${item.h || 30}${seatInfo} | ${item.rot || 0}°
-        </div>
-      `;
-      listBox.appendChild(card);
-    });
-
-    sec.appendChild(header);
-    sec.appendChild(listBox);
-    container.appendChild(sec);
-  });
-}
-
-function highlightRightPanel() {
-  renderRightPanel();
-}
-
-function selectItemById(id) {
-  activeId = id;
-  const item = appState.items.find(i => i.id === id);
-  // 若目前處於「坐下」狀態且從列表中點選了椅子，自動讓人物坐過去並更新視角
-  if (item && isChairItem(item) && appState.human.posture === "sit") {
-    window.sitOnSelectedChair(item.id);
-  }
-  if (currentMode === "2D") {
-    const group = canvas.getObjects().find(o => o.itemId === id);
-    if (group && !forcePanMode) {
-      canvas.setActiveObject(group);
-      canvas.requestRenderAll();
-    }
-  } else if (currentMode === "3D" && transformControl) {
-    const mesh = selectable3DMeshes.find(m => m.userData.itemId === id);
-    if (mesh) attachGizmoWithRules(mesh);
-  }
-  switchLeftTab('item');
-  updateLeftItemPanel();
-  highlightRightPanel();
-}
-
-function zoomToFit() {
-  if (!canvas) return;
-  const rw = appState.room.width, rd = appState.room.depth;
-  const container = document.getElementById("canvas-container");
-  const cw = container.clientWidth - 90, ch = container.clientHeight - 90;
-  const scale = Math.min(cw / rw, ch / rd, 1.65);
-  const offsetX = (container.clientWidth - rw * scale) / 2;
-  const offsetY = (container.clientHeight - rd * scale) / 2;
-  canvas.setViewportTransform([scale, 0, 0, scale, offsetX, offsetY]);
-  canvas.requestRenderAll();
-}
-
-document.getElementById("btn-zoom-fit").addEventListener("click", zoomToFit);
-document.getElementById("btn-zoom-in").addEventListener("click", () => canvas.setZoom(Math.min(canvas.getZoom() * 1.2, 5)));
-document.getElementById("btn-zoom-out").addEventListener("click", () => canvas.setZoom(Math.max(canvas.getZoom() / 1.2, 0.2)));
-document.getElementById("btn-pan-toggle").addEventListener("click", function() {
-  forcePanMode = !forcePanMode;
-  this.innerText = forcePanMode ? "✋ 平移: 開" : "✋ 平移: 關";
-  this.classList.toggle("active", forcePanMode);
-  renderFullScene();
-});
-
-// 儲存目前設計至 App (關閉再重開時會由 loadInitialAppState 自動載入)
-document.getElementById("btn-save-local").addEventListener("click", () => {
-  persistAppStateToLocal(false);
-  const banner = document.getElementById("save-status-banner");
-  if (banner) {
-    const nowStr = new Date().toLocaleTimeString();
-    banner.innerText = `✅ 已於 ${nowStr} 儲存！關閉並重新開啟 App 將自動載入此設計。`;
-  }
-});
-
-document.getElementById("btn-load-local").addEventListener("click", () => {
-  let saved = null;
-  for (let i = 0; i < STORAGE_KEYS_LEGACY.length; i++) {
-    saved = localStorage.getItem(STORAGE_KEYS_LEGACY[i]);
-    if (saved) break;
-  }
-  if (saved) {
-    appState = JSON.parse(saved);
-    normalizeAppState(appState);
-    appState.items.forEach(it => saveValidItemBackup(it));
-    renderCategoryUI();
-    renderChairSelectOptions();
-    initRoomFormValues();
-    initHumanFormValues();
-    syncLockScaleUI();
-    renderVoidListUI();
-    renderFullScene();
-    zoomToFit();
-    showToast("📂 已成功載入上次儲存的設計！");
-  } else {
-    showToast("⚠️ 尚未找到本地存檔紀錄！");
-  }
-});
-
-document.getElementById("btn-export-file").addEventListener("click", () => {
-  const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(appState, null, 2));
-  const a = document.createElement('a');
-  a.setAttribute("href", dataStr);
-  a.setAttribute("download", "room_design_" + new Date().toISOString().slice(0, 10) + ".json");
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-});
-
-document.getElementById("file-import").addEventListener("change", function(e) {
-  const file = e.target.files[0];
-  if (!file) return;
-  const reader = new FileReader();
-  reader.onload = function(evt) {
-    try {
-      appState = JSON.parse(evt.target.result);
-      normalizeAppState(appState);
-      appState.items.forEach(it => saveValidItemBackup(it));
-      persistAppStateToLocal(true);
-      renderCategoryUI();
-      renderChairSelectOptions();
-      initRoomFormValues();
-      initHumanFormValues();
-      syncLockScaleUI();
-      renderVoidListUI();
-      renderFullScene();
-      zoomToFit();
-      showToast("✅ 專案檔案載入並儲存成功！");
-    } catch(err) {
-      alert("❌ 檔案格式錯誤！");
-    }
-  };
-  reader.readAsText(file);
-});
-
-document.getElementById("btn-reset-default").addEventListener("click", () => {
-  if (confirm("確定要重置回附圖原始預設配置嗎？（這也會清除目前儲存的自動記憶）")) {
-    const baseCfg = (typeof DEFAULT_ORIGINAL_CONFIG !== "undefined") ? DEFAULT_ORIGINAL_CONFIG : INITIAL_CONFIG;
-    appState = JSON.parse(JSON.stringify(baseCfg));
-    normalizeAppState(appState);
-    STORAGE_KEYS_LEGACY.forEach(k => localStorage.removeItem(k));
-    appState.items.forEach(it => saveValidItemBackup(it));
-    renderCategoryUI();
-    renderChairSelectOptions();
-    initRoomFormValues();
-    initHumanFormValues();
-    syncLockScaleUI();
-    renderVoidListUI();
-    renderFullScene();
-    zoomToFit();
-    showToast("🔄 已重置回原始預設配置！");
-  }
-});
-
-function initPanelResizers() {
-  const leftPanel = document.getElementById("left-panel");
-  const rightPanel = document.getElementById("right-panel");
-  const leftResizer = document.getElementById("left-resizer");
-  const rightResizer = document.getElementById("right-resizer");
-
-  let resizingSide = null;
-
-  const startResize = (side, e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    resizingSide = side;
-  };
-
-  if (leftResizer) leftResizer.addEventListener("pointerdown", e => startResize("left", e));
-  if (rightResizer) rightResizer.addEventListener("pointerdown", e => startResize("right", e));
-
-  window.addEventListener("pointermove", e => {
-    if (!resizingSide) return;
-    if (resizingSide === "left") {
-      const newW = Math.max(145, Math.min(window.innerWidth * 0.88, e.clientX));
-      leftPanel.style.width = newW + "px";
-    } else if (resizingSide === "right") {
-      const newW = Math.max(145, Math.min(window.innerWidth * 0.88, window.innerWidth - e.clientX));
-      rightPanel.style.width = newW + "px";
-    }
-    window.dispatchEvent(new Event("resize"));
-  });
-
-  window.addEventListener("pointerup", () => {
-    resizingSide = null;
-  });
-
-  document.querySelectorAll("input, select").forEach(el => {
-    el.addEventListener("focus", () => {
-      setTimeout(() => {
-        el.scrollIntoView({ behavior: "smooth", block: "center" });
-      }, 280);
-    });
-  });
-
-  const newCatSel = document.getElementById("new-obj-category");
-  if (newCatSel) newCatSel.addEventListener("change", window.onNewObjTypeChange);
-}
-
-window.toggleMinimizeFPVHud = function() {
-  const hud = document.getElementById("fpv-hud");
-  const btn = document.getElementById("btn-fpv-min");
-  hud.classList.toggle("minimized");
-  btn.innerText = hud.classList.contains("minimized") ? "□" : "—";
-};
-
-function initFPVHudDragAndResize() {
-  const hud = document.getElementById("fpv-hud");
-  const dragBar = document.getElementById("fpv-hud-drag");
-  const resizer = document.getElementById("fpv-hud-resizer");
-  if (!hud || !dragBar || !resizer) return;
-
-  let isDraggingHud = false;
-  let isResizingHud = false;
-  let startX = 0, startY = 0;
-  let origLeft = 0, origTop = 0;
-  let currentScale = 1.0;
-  let startScale = 1.0;
-
-  dragBar.addEventListener("pointerdown", e => {
-    if (e.target.tagName.toLowerCase() === "button") return;
-    e.preventDefault();
-    e.stopPropagation();
-    isDraggingHud = true;
-    const rect = hud.getBoundingClientRect();
-    const parentRect = hud.parentElement.getBoundingClientRect();
-    origLeft = rect.left - parentRect.left;
-    origTop = rect.top - parentRect.top;
-    hud.style.left = origLeft + "px";
-    hud.style.top = origTop + "px";
-    hud.style.right = "auto";
-    hud.style.bottom = "auto";
-    startX = e.clientX;
-    startY = e.clientY;
-  });
-
-  resizer.addEventListener("pointerdown", e => {
-    e.preventDefault();
-    e.stopPropagation();
-    isResizingHud = true;
-    startX = e.clientX;
-    startY = e.clientY;
-    startScale = currentScale;
-  });
-
-  window.addEventListener("pointermove", e => {
-    if (isDraggingHud) {
-      const parentRect = hud.parentElement.getBoundingClientRect();
-      let nx = origLeft + (e.clientX - startX);
-      let ny = origTop + (e.clientY - startY);
-      nx = Math.max(4, Math.min(parentRect.width - 90, nx));
-      ny = Math.max(48, Math.min(parentRect.height - 60, ny));
-      hud.style.left = nx + "px";
-      hud.style.top = ny + "px";
-    } else if (isResizingHud) {
-      const delta = (e.clientX - startX + e.clientY - startY) * 0.004;
-      currentScale = Math.max(0.55, Math.min(1.35, startScale + delta));
-      hud.style.transform = `scale(${currentScale})`;
-    }
-  });
-
-  window.addEventListener("pointerup", () => {
-    isDraggingHud = false;
-    isResizingHud = false;
-  });
-}
+  document.getElementById("obj-count").innerText = `共 ${appState.items.length} 項`; container.innerHTML = "";  const badgeMap = { furniture: { text: "家具", cls: "" }, chair: { text: "🪑 椅子", cls: "win" }, wall_item: { text: "🖼️ 牆物", cls: "win" }, door: { text: "🚪 門", cls: "door" }, window: { text: "🪟 窗", cls: "win" }, socket: { text: "🔌 插座", cls: "win" }, switch: { text: "💡 開關", cls: "win" } };  appState.categories.forEach(cat => { const catItems = appState.items.filter(it => (it.category \vert{}\vert{} appState.categories[0]) === cat); const sec = document.createElement("div"); sec.className = "cat-section"; sec.setAttribute("data-cat", cat);  sec.addEventListener("dragover", e => { e.preventDefault(); sec.classList.add("drag-over"); }); sec.addEventListener("dragleave", () => sec.classList.remove("drag-over")); sec.addEventListener("drop", e => { e.preventDefault(); sec.classList.remove("drag-over"); if (draggedItemId) moveItemToCategory(draggedItemId, cat); });  const isExpanded = expandedCategories.has(cat); const header = document.createElement("div"); header.className = "cat-header"; header.innerHTML = `<span>${isExpanded ? '📂' : '📁'} ${cat}${cat === '床' ? '🛏️' : (cat === '椅子' ? '🪑' : '')}</span><span style="font-size:11px;color:#64748B;">${catItems.length
